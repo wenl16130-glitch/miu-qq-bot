@@ -356,6 +356,58 @@
             </div>
         </div>
     </div>
+    <div id="floating-cd" onclick="openListenTogether()" style="display: none;">
+        <img id="floating-cd-cover" src="https://placehold.co/100/ccc/fff?text=Music">
+    </div>
+    <div id="floating-cd" onclick="openListenTogether()" style="display: none;">
+        <img id="floating-cd-cover" src="https://placehold.co/100/ccc/fff?text=Music">
+    </div>
+
+    <div id="listen-together-inline-card" class="lt-inline-card" style="display: none;">
+        <!-- 核心视觉区：头像与中间的语音波形 -->
+        <div class="lt-avatars-row">
+            <div class="lt-avatar-box left">
+                <img id="lt-my-avatar" src="" class="lt-avatar-img">
+            </div>
+            <div class="lt-wave-anim">
+                <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="lt-avatar-box right">
+                <img id="lt-char-avatar" src="" class="lt-avatar-img">
+            </div>
+        </div>
+        
+        <div class="lt-status-text">相距13.14公里，听了<span id="lt-hours">0</span>小时 <span id="lt-mins">0</span> 分</div>
+
+        <!-- 增加了歌词行 -->
+        <div class="lt-song-info">
+            <div class="lt-song-name" id="lt-song-name">尚未播放</div>
+            <div class="lt-artist" id="lt-artist">等待切歌</div>
+            <div class="lt-lyric" id="lt-lyric">...</div>
+        </div>
+        
+        <div class="lt-progress-area">
+            <span class="lt-time-current" id="lt-time-current">0:00</span>
+            <div class="lt-progress-bar" id="lt-progress-bar" onclick="seekListenTogether(event)">
+                <div class="lt-progress-fill" id="lt-progress-fill"><div class="lt-progress-dot"></div></div>
+            </div>
+            <span class="lt-time-total" id="lt-time-total">-0:00</span>
+        </div>
+
+        <div class="lt-controls">
+            <!-- 左侧收藏，右侧改成了循环，删除了向上的收起箭头 -->
+            <i class="far fa-star lt-btn-side" onclick="openMusicSearchModal()"></i>
+            <div class="lt-main-btns">
+                <i class="fas fa-backward lt-btn-skip" onclick="nextTrack(-1)"></i>
+                <div class="lt-play-circle" onclick="togglePlayback()">
+                    <i class="fas fa-play" id="lt-play-icon" style="margin-left: 2px;"></i>
+                    <i class="fas fa-pause" id="lt-pause-icon" style="display:none;"></i>
+                </div>
+                <i class="fas fa-forward lt-btn-skip" onclick="nextTrack(1)"></i>
+            </div>
+            <i class="fas fa-retweet lt-btn-side" id="lt-loop-btn" onclick="toggleLoopMode()"></i>
+        </div>
+    </div>
 
     <div class="room-content" id="roomMessages"></div>
 
@@ -1427,6 +1479,13 @@
             <label class="glass-input-label" id="glassLabel">名称</label>
             <input type="text" class="glass-input" id="glassNameInput" placeholder="输入名称...">
             <textarea class="glass-input" id="glassBatchInput" style="display:none; height:120px; resize:none;" placeholder="输入链接..."></textarea>
+            <div id="glassLrcArea" style="display:none; margin-top:5px;">
+        <label class="glass-input-label">歌词文件 (LRC格式 / 可选)</label>
+        <div class="glass-input" style="cursor:pointer; display:flex; justify-content:center; align-items:center; color:#666;" onclick="document.getElementById('lrcFileInput').click()">
+            <i class="fas fa-file-alt" style="margin-right:8px;"></i> <span id="lrcFileName">点击选择 .lrc 歌词文件</span>
+        </div>
+        <input type="file" id="lrcFileInput" accept=".lrc" style="display:none" onchange="handleLrcFile(this)">
+    </div>
         </div>
 
         <div class="glass-btn-row">
@@ -2483,70 +2542,7 @@
         </div>
     </div>
 </div>
-<!-- ★★★ 新增：一起听全屏沉浸式界面 ★★★ -->
-<div id="listen-together-overlay">
-    <!-- 顶部下拉关闭按钮 -->
-    <div class="lt-header">
-        <i class="fas fa-chevron-down" onclick="closeListenTogether()"></i>
-    </div>
-    
-    <!-- 核心视觉区：头像、连接线、波形 -->
-    <div class="lt-visual-area">
-        <svg class="lt-curve-svg" viewBox="0 0 300 150">
-            <path d="M 30,20 C 30,140 270,140 270,20" fill="none" stroke="#ccc" stroke-width="1.5" stroke-dasharray="4,4" />
-        </svg>
-        <div class="lt-avatars-row">
-            <div class="lt-avatar-box left">
-                <div class="lt-headphone-l"></div>
-                <img id="lt-my-avatar" src="" class="lt-avatar-img">
-            </div>
-            <div class="lt-wave-anim">
-                <span></span><span></span><span></span><span></span>
-            </div>
-            <div class="lt-avatar-box right">
-                <div class="lt-headphone-r"></div>
-                <img id="lt-char-avatar" src="" class="lt-avatar-img">
-            </div>
-        </div>
-        <div class="lt-status-text">相距13.14公里，听了<span id="lt-hours">0</span>小时 <span id="lt-mins">0</span> 分</div>
-    </div>
 
-    <!-- 底部毛玻璃播放控制卡片 -->
-    <div class="lt-glass-card">
-        <div class="lt-song-info">
-            <div class="lt-song-name" id="lt-song-name">尚未播放</div>
-            <div class="lt-artist" id="lt-artist">等待切歌</div>
-            <div class="lt-lyric" id="lt-lyric">...</div>
-        </div>
-        
-        <div class="lt-progress-area">
-            <span class="lt-time-current" id="lt-time-current">0:00</span>
-            <div class="lt-progress-bar" id="lt-progress-bar" onclick="seekListenTogether(event)">
-                <div class="lt-progress-fill" id="lt-progress-fill">
-                    <div class="lt-progress-dot"></div>
-                </div>
-            </div>
-            <span class="lt-time-total" id="lt-time-total">-0:00</span>
-        </div>
-
-        <div class="lt-controls">
-            <!-- 星号：调用已有的搜索功能 -->
-            <i class="far fa-star lt-btn-side" onclick="openMusicSearchModal()"></i>
-            
-            <div class="lt-main-btns">
-                <i class="fas fa-backward lt-btn-skip" onclick="nextTrack(-1)"></i>
-                <div class="lt-play-circle" onclick="togglePlayback()">
-                    <i class="fas fa-play" id="lt-play-icon"></i>
-                    <i class="fas fa-pause" id="lt-pause-icon" style="display:none;"></i>
-                </div>
-                <i class="fas fa-forward lt-btn-skip" onclick="nextTrack(1)"></i>
-            </div>
-            
-            <!-- 循环模式 -->
-            <i class="fas fa-retweet lt-btn-side" id="lt-loop-btn" onclick="toggleLoopMode()"></i>
-        </div>
-    </div>
-</div>
 <div id="check-phone-root"></div>
 <script src="check_phone.js"></script>
 </body>

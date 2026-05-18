@@ -4218,6 +4218,50 @@ const isMorningWakeUp = (currentHour >= 5 && currentHour <= 11) && (diffMins > 3
     if (typeof getVirtualTimePrompt === 'function') {
         systemPrompt += getVirtualTimePrompt(chat);
     }
+
+    if (typeof isPlaying !== 'undefined' && isPlaying && currentMusicIndex !== -1 && musicPlaylist[currentMusicIndex]) {
+        const track = musicPlaylist[currentMusicIndex];
+        if (!track.isKeepAlive) {
+            let lrcPrompt = "";
+            let currentLine = "";
+            
+            // 如果存在已解析的歌词
+            if (typeof currentParsedLyrics !== 'undefined' && currentParsedLyrics.length > 0) {
+                // 1. 提取全部歌词 (最多截取前500字，防止Token爆炸)
+                let fullLrc = currentParsedLyrics.map(l => l.text).filter(t => t).join(' / ');
+                if (fullLrc.length > 500) fullLrc = fullLrc.substring(0, 500) + '...';
+                
+                // 2. 精准匹配当前正在播放的那一句歌词
+                if (typeof audioPlayer !== 'undefined') {
+                    const currentTime = audioPlayer.currentTime;
+                    for (let i = 0; i < currentParsedLyrics.length; i++) {
+                        if (currentTime >= currentParsedLyrics[i].time) {
+                            currentLine = currentParsedLyrics[i].text;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                
+                lrcPrompt = `\n【歌曲大意参考】：${fullLrc}`;
+                if (currentLine) {
+                    lrcPrompt += `\n【当前耳机里刚好唱到这句】："${currentLine}"`;
+                }
+            }
+            
+            systemPrompt += `\n【当前系统状态】：用户此时正在和你“一起听歌”，背景音乐正在播放《${track.name}》(歌手：${track.artist})。如果氛围合适，你可以自然地聊起这首歌、引用歌词，或者对当前刚好唱到的那句歌词做出反应。${lrcPrompt}`;
+        }
+    }
+
+    if (typeof musicPlaylist !== 'undefined') {
+        const validTracks = musicPlaylist.filter(t => !t.isKeepAlive);
+        if (validTracks.length > 0) {
+            // 取出列表里的歌名 (限制前30首防止字数超标)
+            const playlistStr = validTracks.slice(0, 30).map(t => t.name).join('、');
+            systemPrompt += `\n【当前面板的播放列表】：[${playlistStr}]。`;
+        }
+    }
+
     // 1. 世界书
     const recentContextText = chat.messages.slice(-5).map(m => m.text).join(' ');
     const wbContext = getWorldBookContext(chat, recentContextText);
@@ -4405,6 +4449,13 @@ systemPrompt += `\n\n【自主转账能力】：
     [PLAY_MUSIC:歌曲名称]
     例如：[PLAY_MUSIC:我们俩]
     注意：系统会自动在后台搜索网易云/QQ音乐并自动播放。`;
+
+    systemPrompt += `\n【面板切歌能力】：
+    如果用户要求你切到某首歌，或者你想从【当前面板的播放列表】里挑一首歌来放，请在回复中单独包含指令：
+    [SWITCH_SONG:歌曲名称]
+    例如：[SWITCH_SONG:想太多]
+    如果是想随便切下一首，可以使用：[SWITCH_SONG:下一首]
+    注意：此指令仅限切换列表里【已有】的歌。如果想听新歌，请继续用 [PLAY_MUSIC:歌名] 去全网搜索。`;
 
 const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
     if (!hasRelativeCard) {
@@ -4800,22 +4851,23 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
             if (musicPlayMatch) {
                 const searchKeyword = musicPlayMatch[1].trim();
                 
-                // 悄悄告诉用户 AI 正在点歌
-                chat.messages.push({
-                    text: `[系统提示] ${chat.name} 为你点播了一首《${searchKeyword}》...`,
+                // 先告诉系统 AI 打算点什么歌 (引用对象方便后续修改)
+                const sysMusicNotice = {
+                    id: Date.now() + Math.random(),
+                    text: `[系统提示] ${chat.name} 试图为你点播《${searchKeyword}》...`,
                     isSelf: false,
                     time: newTimeStr,
                     timestamp: Date.now(),
                     isHidden: true
-                });
+                };
+                chat.messages.push(sysMusicNotice);
                 
                 // 触发无声搜索并播放
                 setTimeout(async () => {
                     try {
-                        // 默认调用 meting1 接口搜索网易云
                         const list = await searchMetingCore('https://api.i-meto.com/meting/api', searchKeyword);
                         if (list && list.length > 0) {
-                            const song = list[0]; // 默认播第一首
+                            const song = list[0]; 
                             const newTrack = {
                                 id: Date.now(),
                                 name: song.name,
@@ -4827,8 +4879,14 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
                             musicPlaylist.push(newTrack);
                             saveMusicPlaylist();
                             renderPlaylist();
-                            // 立即播放刚加的这首歌
                             playTrack(musicPlaylist.length - 1);
+                            
+                            // ★★★ 核心新增：让 AI 知道具体搜到了什么歌，丰富它的记忆 ★★★
+                            sysMusicNotice.text = `[系统提示] ${chat.name} 为你点播了《${song.name}》 (歌手：${song.artist})。音乐正在后台播放中。`;
+                            saveData(); // 保存修改后的记忆
+                        } else {
+                            sysMusicNotice.text = `[系统提示] ${chat.name} 试图点歌，但未搜索到结果。`;
+                            saveData();
                         }
                     } catch(e) {
                         console.error("AI 搜歌失败", e);
@@ -4836,6 +4894,47 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
                 }, 1000);
                 
                 mainText = mainText.replace(musicPlayMatch[0], '').trim();
+                if (!mainText) continue;
+            }
+
+             const switchSongMatch = mainText.match(/\[\s*(?:SWITCH_SONG|切歌|切换歌曲)\s*[:：]?\s*(.*?)\s*\]/i);
+            if (switchSongMatch) {
+                const targetName = switchSongMatch[1] ? switchSongMatch[1].trim() : "";
+                
+                setTimeout(() => {
+                    const searchName = targetName.toLowerCase();
+                    // 1. 如果 AI 指定了具体的歌名
+                    if (searchName && searchName !== "下一首" && searchName !== "随便") {
+                        // 在本地播放列表中模糊查找
+                        const targetIndex = musicPlaylist.findIndex(t => 
+                            !t.isKeepAlive && 
+                            (t.name.toLowerCase().includes(searchName) || (t.artist && t.artist.toLowerCase().includes(searchName)))
+                        );
+                        
+                        if (targetIndex !== -1) {
+                            // 找到了，直接切到这首歌
+                            if (typeof playTrack === 'function') playTrack(targetIndex);
+                            chat.messages.push({
+                                id: Date.now() + Math.random(), text: `[系统提示] 你已成功将面板切换到了《${musicPlaylist[targetIndex].name}》。`, isSelf: false, time: newTimeStr, timestamp: Date.now(), isHidden: true
+                            });
+                        } else {
+                            // 没找到，反馈给 AI
+                            chat.messages.push({
+                                id: Date.now() + Math.random(), text: `[系统提示] 切换失败，面板列表中没有找到与“${targetName}”相关的歌曲。`, isSelf: false, time: newTimeStr, timestamp: Date.now(), isHidden: true
+                            });
+                        }
+                    } else {
+                        // 2. 如果 AI 没有指定名字，或者是“下一首”，就执行普通切歌
+                        if (typeof nextTrack === 'function') nextTrack();
+                        chat.messages.push({
+                            id: Date.now() + Math.random(), text: `[系统提示] 你已切换到下一首歌。`, isSelf: false, time: newTimeStr, timestamp: Date.now(), isHidden: true
+                        });
+                    }
+                    saveData(); // 保存隐藏记忆
+                }, 800);
+
+                // 把指令从文字里删掉，不让用户看到代码
+                mainText = mainText.replace(switchSongMatch[0], '').trim();
                 if (!mainText) continue;
             }
 
@@ -5389,14 +5488,15 @@ audioPlayer.ontimeupdate = () => {
     if (ltTot) ltTot.innerText = "-" + formatTime(duration - current);
 };
 
-// 增强版播放监听：开启时长记录与灵动岛同步
 audioPlayer.onplaying = () => {
     console.log("音频开始播放");
     const root = document.getElementById('play-btn-root');
-    const ltOverlay = document.getElementById('listen-together-overlay');
+    const ltCard = document.getElementById('listen-together-inline-card'); // ★ 修改这里
+    const floatingCd = document.getElementById('floating-cd'); 
     
     if(root) { root.classList.remove('loading'); root.classList.add('playing'); }
-    if(ltOverlay) ltOverlay.classList.add('playing');
+    if(ltCard) ltCard.classList.add('playing'); // ★ 修改这里
+    if(floatingCd) floatingCd.classList.add('playing'); 
     
     document.getElementById('lt-play-icon').style.display = 'none';
     document.getElementById('lt-pause-icon').style.display = 'block';
@@ -5435,9 +5535,12 @@ audioPlayer.onplaying = () => {
 
 audioPlayer.onpause = () => {
     const root = document.getElementById('play-btn-root');
-    const ltOverlay = document.getElementById('listen-together-overlay');
+    const ltCard = document.getElementById('listen-together-inline-card'); // ★ 修改这里
+    const floatingCd = document.getElementById('floating-cd'); 
+    
     if(root) root.classList.remove('playing');
-    if(ltOverlay) ltOverlay.classList.remove('playing');
+    if(ltCard) ltCard.classList.remove('playing'); // ★ 修改这里
+    if(floatingCd) floatingCd.classList.remove('playing'); 
     
     document.getElementById('lt-play-icon').style.display = 'block';
     document.getElementById('lt-pause-icon').style.display = 'none';
@@ -5487,19 +5590,7 @@ audioPlayer.onwaiting = () => {
     const root = document.getElementById('play-btn-root');
     // 给播放按钮加个 loading 样式（比如转圈圈）
     if(root) root.classList.add('loading'); 
-};
-
-// 6. ★★★ 新增：恢复播放监听 ★★★
-audioPlayer.onplaying = () => {
-    console.log("音频开始播放/恢复播放");
-    const root = document.getElementById('play-btn-root');
-    // 移除 loading 样式，确认为播放状态
-    if(root) {
-        root.classList.remove('loading');
-        root.classList.add('playing');
-    }
-    isPlaying = true;
-};
+}
 
 /* ========================================= */
 /* ★★★ 一起听 & 原生灵动岛核心引擎 ★★★ */
@@ -5507,27 +5598,37 @@ audioPlayer.onplaying = () => {
 let listenTimer = null;
 let listenTotalMinutes = 0; // 记录总听歌时长
 
-// 1. 打开一起听界面
-function openListenTogether() {
+function openListenTogether(forceOpen = false) {
     const chat = chatList.find(c => c.id === currentChatId);
     if (!chat) {
         alert("请先进入某个角色的聊天室，再打开一起听哦~");
         return;
     }
     
-    // 填充头像
-    document.getElementById('lt-my-avatar').src = document.getElementById('meAvatarImg').src;
+    const globalMeAvatar = document.getElementById('meAvatarImg').src;
+    const myAvatar = chat.userAvatar || globalMeAvatar;
+    document.getElementById('lt-my-avatar').src = myAvatar;
     document.getElementById('lt-char-avatar').src = chat.avatar;
     
-    // 还原已保存的听歌时长 (与该角色绑定的)
+    // 还原听歌时长
     listenTotalMinutes = chat.listenTime || 0;
     updateListenTimeUI();
 
-    document.getElementById('listen-together-overlay').classList.add('active');
+    // ★ 控制内嵌卡片的显隐 (直接在当前页面拉开)
+    const card = document.getElementById('listen-together-inline-card');
+    
+    if (forceOpen === true) {
+        card.style.display = 'flex';
+    } else {
+        card.style.display = (card.style.display === 'flex') ? 'none' : 'flex';
+    }
+    
+    // 同步波形跳动状态
+    if (isPlaying) card.classList.add('playing');
 }
 
 function closeListenTogether() {
-    document.getElementById('listen-together-overlay').classList.remove('active');
+    document.getElementById('listen-together-inline-card').style.display = 'none';
 }
 
 // 2. 计时器更新
@@ -5572,12 +5673,10 @@ function toggleLoopMode() {
         loopMode = 'one';
         audioPlayer.loop = true;
         btn.classList.replace('fa-retweet', 'fa-redo'); // 换个图标表示单曲循环
-        btn.style.color = '#007aff';
     } else {
         loopMode = 'all';
         audioPlayer.loop = false;
         btn.classList.replace('fa-redo', 'fa-retweet');
-        btn.style.color = '#666';
     }
 }
 
@@ -5616,15 +5715,24 @@ function playTrack(index) {
     const songNameEl = document.getElementById('main-song-name');
     if(songNameEl) songNameEl.innerText = track.name;
     
-    // ★ 追加更新一起听 UI
+    // 追加更新一起听 UI
     const ltSong = document.getElementById('lt-song-name');
     const ltArt = document.getElementById('lt-artist');
     if(ltSong) ltSong.innerText = track.name;
     if(ltArt) ltArt.innerText = track.artist || "未知歌手";
+
+    // ★★★ 新增：更新悬浮 CD 的封面，并让它显示出来 ★★★
+    const floatingCd = document.getElementById('floating-cd');
+    const floatingCdCover = document.getElementById('floating-cd-cover');
+    if (floatingCd && floatingCdCover) {
+        // 如果这首歌有封面就用封面，没有就用黑胶兜底图
+        floatingCdCover.src = track.cover || 'https://placehold.co/100/333/fff?text=M';
+        floatingCd.style.display = 'block'; // 只要放歌了，就把入口显示出来
+    }
     if (track.isKeepAlive) {
         audioPlayer.loop = true;  // 开启循环
     } else {
-        audioPlayer.loop = false; // 普通歌曲播放完自动切下一首
+        audioPlayer.loop = (loopMode === 'one'); 
     }
     try {
         if (track.file && (track.file instanceof File || track.file instanceof Blob)) {
@@ -6350,9 +6458,14 @@ function openGlassPopup(type, defaultVal = '') {
     const label = document.getElementById('glassLabel');
     const nameInput = document.getElementById('glassNameInput');
     const batchInput = document.getElementById('glassBatchInput');
+    const lrcArea = document.getElementById('glassLrcArea');
 
     nameInput.value = '';
     batchInput.value = '';
+
+    tempLrcText = null; 
+    const lrcBtn = document.getElementById('lrcFileName');
+    if (lrcBtn) lrcBtn.innerText = "点击选择 .lrc 歌词文件";
 
     if (type === 'batch') {
         title.innerText = "批量添加";
@@ -6372,10 +6485,34 @@ function openGlassPopup(type, defaultVal = '') {
         nameInput.style.display = 'block';
         batchInput.style.display = 'none';
         nameInput.value = defaultVal; // 自动填入文件名
+        if (lrcArea) lrcArea.style.display = 'block';
     }
 
     modal.classList.add('show');
 }
+
+let tempLrcText = null; // 用于暂存读取到的歌词文本
+
+window.handleLrcFile = function(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    // 检查是不是 lrc 后缀 (可选防呆)
+    if (!file.name.toLowerCase().endsWith('.lrc')) {
+        alert("请选择 .lrc 格式的歌词文件！");
+        input.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        tempLrcText = e.target.result; // 直接拿到 LRC 文本内容
+        const lrcBtn = document.getElementById('lrcFileName');
+        if (lrcBtn) lrcBtn.innerText = "已加载: " + file.name;
+    };
+    reader.readAsText(file);
+    input.value = ''; // 清空方便重复选
+};
 
 function closeGlassPopup() {
     document.getElementById('glassPopup').classList.remove('show');
@@ -6403,7 +6540,8 @@ function confirmGlassAction() {
                 name: name,
                 artist: "本地上传",
                 file: tempMusicBlob, 
-                id: Date.now()
+                id: Date.now(), 
+                lrc: tempLrcText || "" 
             };
             musicPlaylist.push(newTrack);
             saveMusicPlaylist(); 
@@ -6422,7 +6560,8 @@ function confirmGlassAction() {
                 name: name,
                 artist: "网络资源",
                 url: tempMusicUrl, // 使用暂存的 URL
-                id: Date.now()
+                id: Date.now(),
+                lrc: tempLrcText || ""
             };
             musicPlaylist.push(newTrack);
             saveMusicPlaylist(); // 保存到数据库
@@ -14225,3 +14364,183 @@ async function downloadFromGithub() {
         btn.style.pointerEvents = 'auto';
     }
 }
+
+/* --- 新增：点击空白关闭一起听面板 --- */
+document.addEventListener('click', (e) => {
+    const ltCard = document.getElementById('listen-together-inline-card');
+    const cdEntry = document.getElementById('floating-cd');
+    
+    if (ltCard && ltCard.style.display === 'flex') {
+        // 如果点击的区域不在面板内，也不在黑胶入口上，也不在音乐条上
+        if (!ltCard.contains(e.target) && (!cdEntry || !cdEntry.contains(e.target)) && !e.target.closest('.player-info')) {
+            ltCard.style.display = 'none';
+        }
+    }
+});
+
+/* --- 新增：点击空白关闭一起听面板 --- */
+document.addEventListener('click', (e) => {
+    const ltCard = document.getElementById('listen-together-inline-card');
+    const cdEntry = document.getElementById('floating-cd');
+    if (ltCard && ltCard.style.display === 'flex') {
+        if (!ltCard.contains(e.target) && (!cdEntry || !cdEntry.contains(e.target)) && !e.target.closest('.player-info')) {
+            ltCard.style.display = 'none';
+        }
+    }
+});
+
+/* --- 新增：黑胶片自由拖拽逻辑 --- */
+document.addEventListener('DOMContentLoaded', () => {
+    const cd = document.getElementById('floating-cd');
+    if(!cd) return;
+
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    const startDrag = (e) => {
+        isDragging = true;
+        const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        const rect = cd.getBoundingClientRect();
+        offsetX = clientX - rect.left;
+        offsetY = clientY - rect.top;
+        cd.style.right = 'auto'; 
+        cd.style.left = rect.left + 'px';
+        cd.style.top = rect.top + 'px';
+    };
+
+    const doDrag = (e) => {
+        if (!isDragging) return;
+        e.preventDefault(); 
+        const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        let newX = clientX - offsetX;
+        let newY = clientY - offsetY;
+        
+        if(newX < 0) newX = 0;
+        if(newY < 0) newY = 0;
+        if(newX + cd.offsetWidth > window.innerWidth) newX = window.innerWidth - cd.offsetWidth;
+        if(newY + cd.offsetHeight > window.innerHeight) newY = window.innerHeight - cd.offsetHeight;
+
+        cd.style.left = newX + 'px';
+        cd.style.top = newY + 'px';
+    };
+
+    const stopDrag = () => { isDragging = false; };
+    cd.addEventListener('mousedown', startDrag);
+    cd.addEventListener('touchstart', startDrag, {passive: false});
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('touchmove', doDrag, {passive: false});
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('touchend', stopDrag);
+});
+
+/* =================================================== */
+/* ★★★ 实时歌词解析引擎 & 循环按钮逻辑 (覆盖原版) ★★★ */
+/* =================================================== */
+
+let currentParsedLyrics = []; // 存当前解析好的歌词
+
+// LRC 歌词解析器 (增强版：支持多标签、更健壮)
+function parseLRC(lrcString) {
+    if (!lrcString || typeof lrcString !== 'string') return [];
+    const lines = lrcString.split('\n');
+    const result = [];
+    const timeReg = /\[\d{2}:\d{2}(?:\.\d+)?\]/g;
+    
+    lines.forEach(line => {
+        const matches = line.match(timeReg);
+        if (matches) {
+            const text = line.replace(timeReg, '').trim();
+            matches.forEach(match => {
+                const min = parseInt(match.slice(1, 3));
+                const sec = parseFloat(match.slice(4, -1));
+                const time = min * 60 + sec;
+                if (text) {
+                    result.push({ time, text });
+                }
+            });
+        }
+    });
+    // 按时间戳排序
+    result.sort((a, b) => a.time - b.time);
+    return result;
+}
+
+// 覆盖切歌函数，加载时解析歌词 (异步下载版)
+const originalPlayTrackForLyric = window.playTrack;
+window.playTrack = async function(index) {
+    if (typeof originalPlayTrackForLyric === 'function') originalPlayTrackForLyric(index);
+    const track = musicPlaylist[index];
+    const lyricEl = document.getElementById('lt-lyric');
+    
+    if (track && track.lrc) {
+        if (lyricEl) lyricEl.innerText = "♪ 歌词下载中...";
+        
+        let lrcText = track.lrc;
+        
+        // ★ 核心修复：如果是网易云 API 返回的网址链接，去真正下载里面的文本
+        if (lrcText.startsWith('http')) {
+            try {
+                const res = await fetch(lrcText);
+                lrcText = await res.text();
+                track.lrc = lrcText; // 缓存下来，下次切到这首歌不用重新下载
+                saveMusicPlaylist(); // 保存进数据库
+            } catch (e) {
+                console.error("歌词下载失败", e);
+                lrcText = "";
+            }
+        }
+
+        currentParsedLyrics = parseLRC(lrcText);
+        
+        if (currentParsedLyrics.length > 0) {
+            if (lyricEl) lyricEl.innerText = "♪ 歌词准备就绪";
+        } else {
+            if (lyricEl) lyricEl.innerText = "暂无滚动歌词";
+        }
+    } else {
+        currentParsedLyrics = [];
+        if (lyricEl) lyricEl.innerText = "纯音乐，请欣赏";
+    }
+};
+
+// 挂载到播放器的进度监听上，实现歌词滚动 (保持不变)
+const originalOnTimeUpdate = audioPlayer.ontimeupdate;
+audioPlayer.ontimeupdate = (e) => {
+    if (typeof originalOnTimeUpdate === 'function') originalOnTimeUpdate(e);
+
+    if (currentParsedLyrics.length > 0) {
+        const currentTime = audioPlayer.currentTime;
+        let currentText = currentParsedLyrics[0].text;
+        
+        for (let i = 0; i < currentParsedLyrics.length; i++) {
+            if (currentTime >= currentParsedLyrics[i].time) {
+                currentText = currentParsedLyrics[i].text;
+            } else {
+                break;
+            }
+        }
+        
+        const lyricEl = document.getElementById('lt-lyric');
+        if (lyricEl && lyricEl.innerText !== currentText) {
+            lyricEl.innerText = currentText; 
+        }
+    }
+};
+
+// 覆盖循环按钮逻辑 (保持不变)
+window.toggleLoopMode = function() {
+    const btn = document.getElementById('lt-loop-btn');
+    if (!btn) return;
+    
+    if (loopMode === 'all') {
+        loopMode = 'one';
+        audioPlayer.loop = true;
+        btn.classList.add('single-loop'); 
+    } else {
+        loopMode = 'all';
+        audioPlayer.loop = false;
+        btn.classList.remove('single-loop'); 
+    }
+};
