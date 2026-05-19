@@ -9946,37 +9946,51 @@ textarea.wb-entry-input { height: 80px; resize: none; font-family: inherit; }
 }
 
 /* ========================================= */
-/* ★★★ 透明且可拖拽的黑胶片入口 ★★★ */
+/* ★★★ 苹果原生小白点 (无边框·静止·缩小版) ★★★ */
 /* ========================================= */
 #floating-cd {
     position: absolute;
     top: 70px;
     right: 15px; 
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    /* 改为透明、无边框风格 */
-    border: none;
-    box-shadow: none;
-    background: transparent;
+    width: 44px;  /* 隐形的触控区域，保留足够大小方便手指拖拽 */
+    height: 44px;
+    background: transparent; /* 去除外面的方形黑框 */
     z-index: 2050; 
     
-    animation: cd-spin 10s linear infinite;
-    animation-play-state: paused;
+    display: block; 
     cursor: pointer;
-    
-    /* 为了拖拽时不闪烁，移除 transform 的过渡 */
-    transition: opacity 0.2s; 
+    opacity: 0.5; /* 闲置时半透明，不挡视线 */
+    transition: opacity 0.3s ease, transform 0.1s; 
 }
-#floating-cd:active { opacity: 0.7; }
-#floating-cd.playing { animation-play-state: running; }
 
-#floating-cd-cover {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 50%; /* 保证图片变圆 */
-    /* 给图片本体一点光晕即可 */
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+/* 激活或拖拽时的反馈 */
+#floating-cd:active { 
+    opacity: 1; 
+    transform: scale(0.92); 
 }
-@keyframes cd-spin { 100% { transform: rotate(360deg); } }
+
+/* 彻底隐藏原本的专辑图片 */
+#floating-cd-cover {
+    display: none !important;
+}
+
+/* 纯同心圆层次 (完美还原三层质感并缩小) */
+#floating-cd::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    
+    width: 14px; /* 最里面的白点缩小 */
+    height: 14px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 50%;
+    
+    /* 利用阴影画出外面两层。改为黑灰色系，保证没有黑框也能看清 */
+    box-shadow: 
+        0 0 0 5px rgba(0, 0, 0, 0.3),   /* 中间的过渡层 */
+        0 0 0 10px rgba(0, 0, 0, 0.15); /* 最外圈的淡色层 */
+    
+    pointer-events: none;
+}

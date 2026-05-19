@@ -1780,17 +1780,50 @@ function renderMessages(chat) {
         const realIndex = startIndex + relativeIndex;
         if (msg.isHidden) return;
         if (msg.text && msg.text.includes('[邀请语音通话]')) return;
-        // --- 1. 时间分割线逻辑 ---
+        // 在外层获取一次当前的虚拟日期，用来判断“今天”是哪天
+        const nowVirtualDate = window.getVirtualTimeData ? window.getVirtualTimeData(chat, true).dateStr : "Today";
+
+        // --- 1. 动态跨天与点击切换的时间线逻辑 ---
         const [hh, mm] = (msg.time || "00:00").split(':').map(Number);
         const currentMinutes = hh * 60 + mm; 
-        if (relativeIndex === 0 || (currentMinutes - lastTimeMinutes > 60)) { 
+        const currentDateStr = msg.virtualDate || "Today"; 
+
+        if (relativeIndex === 0 || 
+            currentDateStr !== chat._lastRenderDate || 
+            (currentDateStr === chat._lastRenderDate && currentMinutes - lastTimeMinutes > 60) || 
+            (currentDateStr === chat._lastRenderDate && currentMinutes < lastTimeMinutes)) { 
+            
             const dateDiv = document.createElement('div'); 
             dateDiv.className = 'date-divider'; 
-            dateDiv.innerText = `Today ${msg.time}`; 
+            
+            // ★ 智能默认：如果这条消息的日期等于我们当下的时间，显示 Today，否则显示具体日期
+            let isShowingToday = (currentDateStr === 'Today' || currentDateStr === nowVirtualDate);
+            dateDiv.innerText = isShowingToday ? `Today ${msg.time}` : `${currentDateStr} ${msg.time}`;
+            
+            // ★ 增加点击交互属性
+            dateDiv.style.cursor = 'pointer'; // 给个小手鼠标样式提示可以点击
+            dateDiv.dataset.date = currentDateStr;
+            dateDiv.dataset.time = msg.time;
+            dateDiv.dataset.showToday = isShowingToday ? "true" : "false";
+            
+            // ★ 核心彩蛋：点击无缝切换显示
+            dateDiv.onclick = function() {
+                if (this.dataset.date === 'Today') return; // 如果是没日期的旧数据，就不切换
+                
+                if (this.dataset.showToday === "true") {
+                    this.innerText = `${this.dataset.date} ${this.dataset.time}`; // 变成 05-19 10:30
+                    this.dataset.showToday = "false";
+                } else {
+                    this.innerText = `Today ${this.dataset.time}`; // 变成 Today 10:30
+                    this.dataset.showToday = "true";
+                }
+            };
+
             container.appendChild(dateDiv); 
             lastSenderType = null; 
         } 
         lastTimeMinutes = currentMinutes; 
+        chat._lastRenderDate = currentDateStr;
 
         // --- 撤回逻辑 ---
         const isAiPureCommand = (!msg.isSelf && msg.text.trim() === '[WITHDRAWN]');
@@ -2183,15 +2216,15 @@ chat.showUserAvatar = document.getElementById('toggleUserAvatar').classList.cont
     if (typeof calculateTimeOffset === 'function') {
         const charD = document.getElementById('charVirtualDate').value;
         const charT = document.getElementById('charVirtualTime').value;
-        if (charD && charT) chat.charTimeOffset = calculateTimeOffset(charD, charT, chat.charTimezone);
+        // 修改为 || (或)，只要填了其中一个就生效
+        if (charD || charT) chat.charTimeOffset = calculateTimeOffset(charD, charT, chat.charTimezone, chat.charTimeOffset);
         else delete chat.charTimeOffset;
         
         const userD = document.getElementById('userVirtualDate').value;
         const userT = document.getElementById('userVirtualTime').value;
-        if (userD && userT) chat.userTimeOffset = calculateTimeOffset(userD, userT, chat.userTimezone);
+        if (userD || userT) chat.userTimeOffset = calculateTimeOffset(userD, userT, chat.userTimezone, chat.userTimeOffset);
         else delete chat.userTimeOffset;
     }
-
     chat.chatMemory = document.getElementById('chatMemory').value; 
     chat.customCss = document.getElementById('customCssInput').value;
 
@@ -2782,15 +2815,17 @@ async function sendMsg() {
         text = `<img src="${text}" class="album-msg-img">`;
     }
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    // ★ 核心修复：获取当前虚拟时间快照 (true代表这是User发的消息)
+    const vt = window.getVirtualTimeData(chat, true);
     
     // 4. 构建并保存用户消息
     let newMsg = { 
         text: text, // 直接用修改后的 text
         isSelf: true, 
-        time: timeStr,
-        timestamp: Date.now() 
+        time: vt.timeStr,            // 显示的时间 (如 20:05)
+        virtualDate: vt.dateStr,     // 固化的日期 (如 05-19)
+        virtualTimestamp: vt.ms,     // 固化的毫秒数 (用于剧情计算时间差)
+        timestamp: Date.now()        // 现实世界的真实时间打卡 (用于防发脾气)
     };
 
     if (chat.isUserBlocked) {
@@ -4125,78 +4160,58 @@ async function generateAiReply(chat, isRegenerate = false) {
 
     let timeGapPrompt = "";
     
-    // 2. 如果 AI 以前说过话，计算到现在过去了多久
+    // 2. 智能时间感知（双轨对比防错乱）
     if (lastAiMsg) {
-        // 如果旧消息没有时间戳，给个当前时间兜底，防止报错
-        const lastTime = lastAiMsg.timestamp || Date.now();
-        const nowTime = Date.now();
+        const vtNow = window.getVirtualTimeData(chat, false);
         
-        // 计算绝对时间差 (毫秒 -> 分钟)
-        const diffMs = nowTime - lastTime;
-        const diffMins = Math.floor(diffMs / (1000 * 60));
+        // 计算虚拟时间差 (用于剧情)
+        const lastVirtualTime = lastAiMsg.virtualTimestamp || lastAiMsg.timestamp || Date.now();
+        const diffMinsVirtual = Math.floor((vtNow.ms - lastVirtualTime) / (1000 * 60));
+        
+        // 计算真实时间差 (用于防脾气)
+        const lastRealTime = lastAiMsg.timestamp || Date.now();
+        const diffMinsReal = Math.floor((Date.now() - lastRealTime) / (1000 * 60));
 
-        const currentHour = parseInt(new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Shanghai',
-    hour: 'numeric',
-    hour12: false 
-}).format(new Date()));
+        const currentHour = parseInt(vtNow.timeStr.split(':')[0]);
 
-let timePeriodDesc = "";
-if (currentHour >= 0 && currentHour < 5) timePeriodDesc = "深夜/凌晨";
-else if (currentHour >= 5 && currentHour < 9) timePeriodDesc = "刚睡醒的清晨";
-else if (currentHour >= 9 && currentHour < 12) timePeriodDesc = "上午";
-else if (currentHour >= 12 && currentHour < 14) timePeriodDesc = "中午午休时间";
-else if (currentHour >= 14 && currentHour < 18) timePeriodDesc = "下午";
-else if (currentHour >= 18 && currentHour < 23) timePeriodDesc = "晚上";
-else timePeriodDesc = "深夜";
-
-const isMorningWakeUp = (currentHour >= 5 && currentHour <= 11) && (diffMins > 360 && diffMins < 840);
-
-        console.log(`[时间感知] AI上次发言: ${new Date(lastTime).toLocaleString()}`);
-        console.log(`[时间感知] 当前时间: ${new Date(nowTime).toLocaleString()}`);
-        console.log(`[时间感知] 相差分钟: ${diffMins}, 当前小时: ${currentHour}`);
+        let timePeriodDesc = "";
+        if (currentHour >= 0 && currentHour < 5) timePeriodDesc = "深夜/凌晨";
+        else if (currentHour >= 5 && currentHour < 9) timePeriodDesc = "刚睡醒的清晨";
+        else if (currentHour >= 9 && currentHour < 12) timePeriodDesc = "上午";
+        else if (currentHour >= 12 && currentHour < 14) timePeriodDesc = "中午午休时间";
+        else if (currentHour >= 14 && currentHour < 18) timePeriodDesc = "下午";
+        else if (currentHour >= 18 && currentHour < 23) timePeriodDesc = "晚上";
+        else timePeriodDesc = "深夜";
 
         // --- 场景 A: 间隔极短 (< 2分钟) ---
-        if (diffMins < 2) {
+        if (diffMinsVirtual < 2) {
             timeGapPrompt = `(当前是实时对话，用户秒回了你)`;
         }
         // --- 场景 B: 正常间隔 (< 1小时) ---
-        else if (diffMins < 60) {
-            timeGapPrompt = `(距离你上次发言过去了 ${diffMins} 分钟)`;
+        else if (diffMinsVirtual < 60) {
+            timeGapPrompt = `(距离你上次发言过去了 ${diffMinsVirtual} 分钟)`;
         }
         // --- 场景 C: 长时间间隔 (> 1小时) ---
         else {
-            // 格式化时间显示 (例如: 1.5天 或 3.5小时)
-            let timeDesc = "";
-            if (diffMins > 1440) timeDesc = `${(diffMins / 1440).toFixed(1)}天`;
-            else timeDesc = `${(diffMins / 60).toFixed(1)}小时`;
+            let timeDesc = diffMinsVirtual > 1440 ? `${(diffMinsVirtual / 1440).toFixed(1)}天` : `${(diffMinsVirtual / 60).toFixed(1)}小时`;
 
-            // ★★★ 核心：判断是“过夜”还是“失踪” ★★★
-            // 条件：当前是早上(5点-11点) 且 间隔时间在(6小时-14小时之间)
-            // 这种情况下，大概率是昨天聊完睡了一觉，今天早上醒来回消息
-            const isMorningWakeUp = (currentHour >= 5 && currentHour <= 11) && (diffMins > 360 && diffMins < 840);
+            // ★★★ 核心：“时间机器”判断 ★★★
+            // 如果虚拟时间跨度极大（比如过了10小时），但真实时间只过了不到5分钟，说明用户拨动了时间！
+            const isTimeSkip = (diffMinsVirtual > 60 && diffMinsReal < 5);
+            const isMorningWakeUp = (currentHour >= 5 && currentHour <= 11) && (diffMinsVirtual > 360 && diffMinsVirtual < 840);
 
-            if (isMorningWakeUp) {
-                // 触发“早安”逻辑
+            if (isTimeSkip) {
+                // 触发“剧情跳跃”逻辑，绝对禁止抱怨
                 timeGapPrompt = `
-[系统强指令：场景感知]
-距离上次对话过去了 ${timeDesc}。
-【特殊情况判定】：现在是早上，且间隔正好是一晚上的睡眠时间。
-用户应该是刚醒来看到消息，而不是故意不理你。
-请根据人设自然地打招呼（如：早安、睡醒了吗），语气要温和自然，**不要**抱怨用户消失。
+[系统强指令：时间跳跃感知]
+剧情时间已快进，距离上次对话过去了 ${timeDesc}。
+【特殊情况判定】：这属于自然的剧情时间流逝（比如你们各自去忙了、或者睡了一觉到第二天），请根据【${timePeriodDesc}】的氛围自然开启新话题。
+**绝对禁止**抱怨用户消失或问用户去哪了！
 `;
+            } else if (isMorningWakeUp) {
+                timeGapPrompt = `[系统强指令：场景感知]\n距离上次对话过去了 ${timeDesc}。现在是早上，这只是正常的睡眠时间。请温和地打招呼，不要抱怨用户消失。`;
             } else {
-                // 触发“被冷落”逻辑
-                timeGapPrompt = `
-[系统强指令：用户回归]
-距离你上次发言已经过去了 ${timeDesc}。
-注意：是你发完消息后，**用户一直没回**，把你晾在这一边长达 ${timeDesc}。
-请根据人设做出反应（例如：抱怨用户去哪了、撒娇说想你了、或者高冷地问“你还知道回来？”）。
-禁止说是你自己去忙了。
-【系统强制校准】：
-当前绝对现实时间：北京时间 ${new Date().toLocaleTimeString('en-US', {timeZone:'Asia/Shanghai', hour12:false})} (${timePeriodDesc})。
-请务必根据【${timePeriodDesc}】这个时间段来调整你的精神状态（例如深夜是困倦或感性，清晨是朦胧）。
-`;
+                timeGapPrompt = `[系统强指令：用户回归]\n距离你上次发言已经过去了 ${timeDesc}。注意：是你发完消息后，用户一直没回。请根据人设做出被冷落的反应。`;
             }
         }
     } else {
@@ -4547,8 +4562,9 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
         if (m.replyCtx) {
             contentToSend = `[回复 ${m.replyCtx.name}: ${m.replyCtx.content}]\n${contentToSend}`;
         }
-
-        return { role: m.isSelf ? "user" : "assistant", content: contentToSend };
+        // 让 AI 知道每句话的确切发送时间
+        const datePrefix = m.virtualDate ? `[${m.virtualDate} ${m.time}] ` : '';
+        return { role: m.isSelf ? "user" : "assistant", content: datePrefix + contentToSend };
     });
     
     const messagesPayload = [
@@ -4678,8 +4694,11 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
 
         // 核心处理循环
         for (let i = 0; i < segments.length; i++) {
-            const newTime = new Date();
-            const newTimeStr = `${String(newTime.getHours()).padStart(2,'0')}:${String(newTime.getMinutes()).padStart(2,'0')}`;
+            // ★ 核心修复：获取当前虚拟时间快照 (false代表这是AI发的消息)
+            const vt = window.getVirtualTimeData(chat, false);
+            const newTimeStr = vt.timeStr;
+            const newDateStr = vt.dateStr;
+            const newVirtualMs = vt.ms;
             
             // ★★★ 修复2：强制转换为 String 再 trim，防止报错 ★★★
             let rawSegment = String(segments[i] || "").trim(); 
@@ -5123,7 +5142,16 @@ const blockMatch = mainText.match(/\[\s*BLOCK_USER\s*\]/i);
                if (!aiReplyCtx && !aiRecallContent) continue;
             }
 
-            let msgData = { text: mainText, isSelf: false, time: newTimeStr, timestamp: Date.now(), contentDescription: desc };
+            // ★ 核心修复：将虚拟日期和毫秒数一并保存
+            let msgData = { 
+                text: mainText, 
+                isSelf: false, 
+                time: newTimeStr, 
+                virtualDate: newDateStr,         // 新增：保存固化日期
+                virtualTimestamp: newVirtualMs,  // 新增：保存虚拟毫秒
+                timestamp: Date.now(), 
+                contentDescription: desc 
+            };
             if (aiRecallContent) { msgData.isRecalled = true; msgData.recalledText = mainText; }
             if (aiReplyCtx) msgData.replyCtx = aiReplyCtx;
 
@@ -9136,9 +9164,9 @@ async function executeMusicSearch() {
         if (api === 'meting1') {
             list = await searchMetingCore('https://api.i-meto.com/meting/api', keyword);
         } else if (api === 'meting2') {
-            list = await searchMetingCore('https://meting.qjqq.cn/api.php', keyword);
+            list = await searchMetingCore('https://api.injahow.cn/meting/', keyword);
         } else if (api === 'meting3') {
-            list = await searchVkeysCore('https://api.vkeys.cn/v2/music', keyword);
+            list = await searchMetingCore('https://meting.justns.cn/api.php', keyword);
         }
 
         loading.style.display = 'none';
@@ -9194,26 +9222,6 @@ async function searchMetingCore(apiUrl, keyword) {
         artist: item.author || item.artist || "未知歌手",
         url: item.url, 
         pic: item.pic || "",
-        lrc: item.lrc || ""
-    }));
-}
-
-// 4. Vkeys 核心解析 (你需要根据实际 Vkeys 返回的 JSON 结构微调)
-async function searchVkeysCore(apiUrl, keyword) {
-    const url = `${apiUrl}?kw=${encodeURIComponent(keyword)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("API 请求被拒绝");
-    const data = await res.json();
-    
-    // 假设 Vkeys 返回的数据在 data.data 或 data.list 里
-    const list = data.data || data.list || data;
-    if (!Array.isArray(list)) return [];
-
-    return list.map(item => ({
-        name: item.name || item.title || "未知歌曲",
-        artist: item.singer || item.artist || "未知歌手",
-        url: item.url || item.src,
-        pic: item.cover || item.pic || "",
         lrc: item.lrc || ""
     }));
 }
@@ -14019,22 +14027,57 @@ function extractPngCharaChunk(arrayBuffer) {
 }
 
 // =========================================
+// ★★★ 核心：获取当前虚拟时间与快照 ★★★
+// =========================================
+window.getVirtualTimeData = function(chat, isSelf) {
+    const tz = isSelf ? (chat.userTimezone || 'Asia/Shanghai') : (chat.charTimezone || 'Asia/Shanghai');
+    const offset = isSelf ? (chat.userTimeOffset || 0) : (chat.charTimeOffset || 0);
+    const ms = Date.now() + offset; // 时间会跟着现实自然流逝
+
+    const dateFmt = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, month: '2-digit', day: '2-digit' });
+    const timeFmt = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+
+    return {
+        dateStr: dateFmt.format(new Date(ms)).replace(/\//g, '-'), // 输出 05-19
+        timeStr: timeFmt.format(new Date(ms)), // 输出 20:05
+        ms: ms // 记录精确的毫秒数
+    };
+};
+
+// =========================================
 // ★★★ 异地双轨时空核心引擎 ★★★
 // =========================================
 
-window.calculateTimeOffset = function(dateStr, timeStr, tz) {
-    if (!dateStr || !timeStr) return null;
-    let guessMs = new Date(`${dateStr}T${timeStr}:00`).getTime();
+window.calculateTimeOffset = function(dateStr, timeStr, tz, currentOffset = 0) {
+    // 如果日期和时间都被清空了，则返回 null（重置）
+    if (!dateStr && !timeStr) return null;
+
+    // 获取当前该时区的虚拟时间作为兜底默认值
+    const ms = Date.now() + (currentOffset || 0);
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz || 'Asia/Shanghai',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+    });
+    const parts = formatter.formatToParts(new Date(ms));
+    const p = {};
+    parts.forEach(pt => p[pt.type] = pt.value);
+    
+    // 如果只填了某一项，另一项自动取当前的虚拟时间
+    const finalDate = dateStr || `${p.year}-${p.month}-${p.day}`;
+    const finalTime = timeStr || `${p.hour}:${p.minute}`;
+
+    let guessMs = new Date(`${finalDate}T${finalTime}:00`).getTime();
     
     for (let i = 0; i < 3; i++) {
         const formatted = new Intl.DateTimeFormat('en-US', {
             timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
         }).format(new Date(guessMs));
-        const parts = formatted.match(/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/);
-        if(parts) {
-            const formattedMs = new Date(`${parts[3]}-${parts[1]}-${parts[2]}T${parts[4]}:${parts[5]}:${parts[6]}`).getTime();
-            const targetMs = new Date(`${dateStr}T${timeStr}:00`).getTime();
+        const matchParts = formatted.match(/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/);
+        if(matchParts) {
+            const formattedMs = new Date(`${matchParts[3]}-${matchParts[1]}-${matchParts[2]}T${matchParts[4]}:${matchParts[5]}:${matchParts[6]}`).getTime();
+            const targetMs = new Date(`${finalDate}T${finalTime}:00`).getTime();
             const error = formattedMs - targetMs;
             if (error === 0) break;
             guessMs -= error;
@@ -14067,12 +14110,13 @@ window.saveVirtualTime = function() {
     
     const charD = document.getElementById('charVirtualDate').value;
     const charT = document.getElementById('charVirtualTime').value;
-    if (charD && charT) chat.charTimeOffset = calculateTimeOffset(charD, charT, chat.charTimezone);
+    // 允许单独设置日期或时间
+    if (charD || charT) chat.charTimeOffset = calculateTimeOffset(charD, charT, chat.charTimezone, chat.charTimeOffset);
     else delete chat.charTimeOffset;
     
     const userD = document.getElementById('userVirtualDate').value;
     const userT = document.getElementById('userVirtualTime').value;
-    if (userD && userT) chat.userTimeOffset = calculateTimeOffset(userD, userT, chat.userTimezone);
+    if (userD || userT) chat.userTimeOffset = calculateTimeOffset(userD, userT, chat.userTimezone, chat.userTimeOffset);
     else delete chat.userTimeOffset;
 
     saveData(); // 立即存入数据库
@@ -14389,34 +14433,58 @@ document.addEventListener('click', (e) => {
     }
 });
 
-/* --- 新增：黑胶片自由拖拽逻辑 --- */
+/* --- 苹果风格悬浮球拖拽逻辑 (带滑动阈值防误触) --- */
 document.addEventListener('DOMContentLoaded', () => {
     const cd = document.getElementById('floating-cd');
     if(!cd) return;
 
     let isDragging = false;
+    let hasMoved = false; // 用于区分是点击还是拖拽
+    let startX, startY;
     let offsetX, offsetY;
 
     const startDrag = (e) => {
         isDragging = true;
+        hasMoved = false;
+        
+        // 获取触摸或点击初始坐标
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        startX = clientX;
+        startY = clientY;
+        
         const rect = cd.getBoundingClientRect();
         offsetX = clientX - rect.left;
         offsetY = clientY - rect.top;
         cd.style.right = 'auto'; 
-        cd.style.left = rect.left + 'px';
-        cd.style.top = rect.top + 'px';
+        
+        // 拖动时提升不透明度
+        cd.style.opacity = '1';
     };
 
     const doDrag = (e) => {
         if (!isDragging) return;
-        e.preventDefault(); 
+        
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        
+        // 阈值检查：超过 8px 判定为真实的拖动（降低灵敏度，防止一碰就乱跑）
+        if (!hasMoved) {
+            if (Math.abs(clientX - startX) > 8 || Math.abs(clientY - startY) > 8) {
+                hasMoved = true;
+            } else {
+                return; // 未达到阈值，什么都不做
+            }
+        }
+        
+        if (e.cancelable) {
+            e.preventDefault(); 
+        }
+        
         let newX = clientX - offsetX;
         let newY = clientY - offsetY;
         
+        // 边缘检测防溢出
         if(newX < 0) newX = 0;
         if(newY < 0) newY = 0;
         if(newX + cd.offsetWidth > window.innerWidth) newX = window.innerWidth - cd.offsetWidth;
@@ -14426,7 +14494,22 @@ document.addEventListener('DOMContentLoaded', () => {
         cd.style.top = newY + 'px';
     };
 
-    const stopDrag = () => { isDragging = false; };
+    const stopDrag = () => { 
+        if (isDragging) {
+            // 放手后恢复默认不透明度控制
+            cd.style.opacity = '';
+        }
+        isDragging = false; 
+    };
+
+    // 防止在拖拽后触发点击事件导致面板乱弹
+    cd.addEventListener('click', (e) => {
+        if (hasMoved) {
+            e.stopPropagation();
+            e.preventDefault();
+        }
+    }, { capture: true });
+
     cd.addEventListener('mousedown', startDrag);
     cd.addEventListener('touchstart', startDrag, {passive: false});
     document.addEventListener('mousemove', doDrag);

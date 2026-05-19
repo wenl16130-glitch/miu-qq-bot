@@ -169,7 +169,7 @@ function backToCoupleList() {
     renderCoupleSelector();
 }
 
-// --- 修改 1：修复纪念日点击失效问题 ---
+// --- 修改 1：修复纪念日点击失效与冒泡换图冲突 (完美适配 iOS) ---
 function renderCoupleDays(chat) {
     if (!chat.coupleData || !chat.coupleData.startDate) return;
     const start = chat.coupleData.startDate;
@@ -178,88 +178,79 @@ function renderCoupleDays(chat) {
     let days = Math.floor(diff / (1000 * 60 * 60 * 24));
     if (days < 0) days = 0;
     
-    // 1. 更新数字显示
+    // 更新数字显示
     const numEl = document.getElementById('cp-days-num');
     if (numEl) {
         numEl.innerText = days + 1;
     }
 
-    // 2. ★★★ 核心修复：获取外层容器并绑定点击 ★★★
-    // 我们绑定 .cp-days-info 而不是 numEl，这样点击区域更大，且层级更稳
     const infoEl = document.querySelector('.cp-days-info');
     
     if (infoEl) {
-        // 强制提升层级，确保在背景图之上
         infoEl.style.position = 'relative';
         infoEl.style.zIndex = '1001'; 
-        infoEl.style.cursor = 'pointer';
-
-        // 重新绑定点击事件 (先移除旧的防止重复，虽然直接覆盖onclick也行)
-        infoEl.onclick = function(e) {
-            e.preventDefault();
-            e.stopPropagation(); // 阻止冒泡，防止触发卡片背景点击
-            console.log("点击了纪念日，尝试打开日期选择器"); // 调试用
-            triggerCoupleDatePicker();
-        };
-    }
-}
-
-// 确保日期选择器触发函数兼容性强
-function triggerCoupleDatePicker() {
-    const input = document.getElementById('cp-date-picker');
-    
-    if (!input) {
-        console.error("找不到 ID 为 cp-date-picker 的 input 元素");
-        // 动态创建备用方案
-        const newInput = document.createElement('input');
-        newInput.type = 'date';
-        newInput.id = 'cp-date-picker';
-        // 关键：必须是可见的（虽然透明），且不能是 display: none
-        newInput.style.position = 'fixed';
-        newInput.style.left = '0';
-        newInput.style.top = '0';
-        newInput.style.width = '1px';
-        newInput.style.height = '1px';
-        newInput.style.opacity = '0';
-        newInput.style.pointerEvents = 'auto'; // 允许交互
-        newInput.style.zIndex = '9999';
         
-        newInput.onchange = function() { updateCoupleDate(this); };
-        document.body.appendChild(newInput);
-        
-        // 稍微延迟一下再点击，确保 DOM 渲染完成
-        setTimeout(() => {
-            newInput.focus();
-            newInput.click(); 
-        }, 50);
-        return;
-    }
+        // ★★★ 核心修复1：给容器加上阻止冒泡，切断往外层卡片的点击传递 ★★★
+        infoEl.onclick = function(e) { e.stopPropagation(); };
 
-    // 尝试打开
-    try {
-        // 1. 先尝试新版 API (现代浏览器)
-        if (typeof input.showPicker === 'function') {
-            input.showPicker();
-        } else {
-            // 2. 降级方案 (移动端核心)
-            // 先聚焦，再点击，这是 iOS/Android 的常见 hack
-            input.focus(); 
-            input.click(); 
+        let datePicker = infoEl.querySelector('#cp-date-picker-ios');
+        if (!datePicker) {
+            datePicker = document.createElement('input');
+            datePicker.type = 'date';
+            datePicker.id = 'cp-date-picker-ios';
+            
+            datePicker.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                opacity: 0;
+                cursor: pointer;
+                -webkit-appearance: none;
+                appearance: none;
+                border: none;
+                background: transparent;
+                -webkit-tap-highlight-color: transparent; 
+                outline: none;
+            `;
+            
+            // ★★★ 核心修复2：给透明输入框也加上阻止冒泡，彻底杜绝换图菜单弹脸 ★★★
+            datePicker.onclick = function(e) { e.stopPropagation(); };
+            
+            datePicker.onchange = function() { updateCoupleDate(this); };
+            infoEl.appendChild(datePicker);
         }
-    } catch (e) {
-        console.warn("无法弹出日期选择器，尝试强制点击", e);
-        input.focus();
-        input.click(); 
     }
 }
 
-// 日期改变回调
+function triggerCoupleDatePicker() {
+    console.log("已完全切换为 iOS 原生透明遮罩物理点击，废弃旧版 JS 触发");
+}
+
 function updateCoupleDate(input) {
     if (!currentCoupleChatId || !input.value) return;
     const chat = chatList.find(c => c.id === currentCoupleChatId);
-    chat.coupleData.startDate = new Date(input.value).getTime();
-    saveData();
-    renderCoupleDays(chat);
+    if (chat && chat.coupleData) {
+        // ★ 时区修复：直接拆分字符串，防止 new Date('YYYY-MM-DD') 导致东八区少一天的经典 Bug
+        const parts = input.value.split('-'); 
+        if (parts.length === 3) {
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; // JS 的月份从 0 开始
+            const day = parseInt(parts[2], 10);
+            // 生成当前时区下的零点时间
+            chat.coupleData.startDate = new Date(year, month, day, 0, 0, 0).getTime();
+        } else {
+            // 兜底方案
+            chat.coupleData.startDate = new Date(input.value).getTime();
+        }
+        
+        saveData();
+        renderCoupleDays(chat);
+        
+        // 选完后强制失去焦点，让 iOS 平滑收起日历滚轮面板
+        input.blur(); 
+    }
 }
 
 // ★★★ 核心：应用背景图 (读取数据并显示) ★★★
