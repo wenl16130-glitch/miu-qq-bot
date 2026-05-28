@@ -570,6 +570,15 @@
     
     <div style="border-top: 1px dashed #eee; margin: 15px 0;"></div>
 
+    <div class="mem-row" style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 13px; color: #666;">回复消息条数</span>
+        <div style="display:flex; align-items:center; gap:5px;">
+            <input type="number" class="mem-input-small" id="charReplyMin" placeholder="1" style="width:50px; text-align: center; border-radius: 8px; border: 1px solid #eee; padding: 5px 0;">
+            <span style="font-size:12px;color:#ccc;">-</span>
+            <input type="number" class="mem-input-small" id="charReplyMax" placeholder="3" style="width:50px; text-align: center; border-radius: 8px; border: 1px solid #eee; padding: 5px 0;">
+        </div>
+    </div>
+
     <!-- 4. 时区设置 -->
     <div class="settings-label" style="display:flex; justify-content:space-between; align-items:center; margin-top: 5px;">
         <span>时区设置</span>
@@ -825,6 +834,95 @@
     <input type="number" class="api-input" id="apiMaxTokens" placeholder="默认 2048 (请根据使用模型来填写)" value="2048">
     <div style="font-size:10px; color:#999; margin-top:5px;">
         设置太大会导致 500 报错，建议gemini设置为3w
+    </div>
+</div>
+
+<div class="api-divider" style="height:1px; background:#f0f0f0; margin: 25px 0 15px 0;"></div>
+
+<!-- 副 API 终点 (无卡片，无大标题，透明背景) -->
+<div class="api-input-group">
+    <label>副 API Endpoint</label>
+    <input type="text" class="api-input" id="secApiEndpoint" placeholder="例如: https://api.openai.com/v1">
+</div>
+
+<!-- 副 API 密钥 (无卡片，透明背景) -->
+<div class="api-input-group">
+    <label>副 API Key</label>
+    <input type="password" class="api-input" id="secApiKey" placeholder="sk-...">
+</div>
+
+<!-- 副 API 模型与拉取 (无卡片，透明背景) -->
+<div class="api-input-group">
+    <label>副 API Model</label>
+    <div class="api-row-flex">
+        <select class="api-input" id="secApiModel"></select>
+        <button class="api-btn-small" onclick="fetchSecModels()" id="secModelFetchBtn">拉取</button>
+    </div>
+</div>
+
+<!-- 副 API 温度 (无卡片，透明背景) -->
+<div class="api-input-group">
+    <div class="flex-between">
+        <label>副 API Temperature</label>
+        <span id="secTempDisplay">1.0</span>
+    </div>
+    <input type="range" id="secApiTemp" min="0" max="2" step="0.1" value="1.0" 
+           style="width: 100%; accent-color: #333; cursor: pointer; margin: 15px 0; appearance: none; height: 6px; background: #f0f0f0; border-radius: 10px;"
+           oninput="document.getElementById('secTempDisplay').innerText = this.value">
+</div>
+
+<!-- 副 API 最大 Token (无卡片，透明背景) -->
+<div class="api-input-group">
+    <label>副 API Max Tokens</label>
+    <input type="number" class="api-input" id="secApiMaxTokens" placeholder="默认 2048" value="2048">
+</div>
+
+<div class="api-divider" style="height:1px; background:#f0f0f0; margin: 15px 0;"></div>
+
+<!-- 副 API 适用功能选择 (仿微信设置行，仅此卡片有白色背景) -->
+<div class="settings-label" style="margin-left:5px; font-size:12px; color:#999; margin-bottom: 8px;">副 API 适用功能</div>
+<div class="settings-card-box" style="padding: 10px 15px; border: 1px solid #eee; margin-bottom: 25px;">
+    
+    <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 8px;">
+        <span style="font-size:13px; color:#555;">总结</span>
+        <div class="wb-toggle" id="secUseSummary" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
+    </div>
+
+    <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 8px;">
+        <span style="font-size:13px; color:#555;">论坛</span>
+        <div class="wb-toggle" id="secUseForum" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
+    </div>
+
+    <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 8px;">
+        <span style="font-size:13px; color:#555;">查手机</span>
+        <div class="wb-toggle" id="secUseCheckPhone" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
+    </div>
+
+    <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 8px;">
+        <span style="font-size:13px; color:#555;">日记</span>
+        <div class="wb-toggle" id="secUseDiary" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
+    </div>
+
+    <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 8px;">
+        <span style="font-size:13px; color:#555;">拉黑</span>
+        <div class="wb-toggle" id="secUseQuiz" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
+    </div>
+
+    <div class="mem-row" style="margin-bottom: 0; padding-bottom: 0;">
+        <span style="font-size:13px; color:#555;">日常聊天</span>
+        <div class="wb-toggle" id="secUseChat" onclick="toggleSwitch(this); saveData();">
+            <div class="wb-toggle-knob"></div>
+        </div>
     </div>
 </div>
 <!-- ★★★ 新增：流式传输开关 (极简版) ★★★ -->

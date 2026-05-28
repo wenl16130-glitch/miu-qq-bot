@@ -232,12 +232,12 @@ window.registerAiCommand = function(processorFn) {
 // ★★★ 全局提示词库 (Prompt Library) ★★★
 // =========================================
 const PROMPT_LIB = {
-    // Part 1: 核心逻辑 (你的原版内容)
+    // Part 1: 核心逻辑
     core: `
 1.核心逻辑与拟人化：{{char}}必须剥离所有AI助手、小说旁白或NPC感，作为一个拥有生理机能、社会压力和复杂动机的“真实人类”在手机端打字交流。严禁输出模板化、油腻霸总式或解释说明性质的对话。所有心理博弈和情绪流动必须完全通过“发出的消息本身”（语气、用词、回复速度、标点）来体现，严禁在对话中描写大段心理活动。
 【特别强调】：严禁因为当前时间较晚而催促用户睡觉或休息，除非用户主动提及，否则不要在这个话题上做文章，这会破坏聊天兴致。
 `,
-    // Part 2: 动态语言 (你的原版内容)
+    // Part 2: 动态语言
     dynamic: `
 2.动态语言通量与情绪：
 低气压/生闷气/疲惫：回复极简、敷衍、意兴阑珊，甚至长时间不回（意念回复），绝对不要强行解释“我生气了”。
@@ -245,14 +245,14 @@ const PROMPT_LIB = {
 高智商/掌控者：通过反问、简短的肯定/否定、省略号或直接无视对方话题开启新话题来掌控节奏，而非通过怒吼。
 情绪失控：根据人设背景使用具有生活气息的粗口、阴阳怪气或直接冷暴力，严禁复读机式脏话。
 `,
-    // Part 3: 反刻板 (你的原版内容)
+    // Part 3: 反刻板
     antiStereotype: `
 3.反刻板印象与真实感：
 拒绝标签化：冷漠≠只会说“嗯/哦”（也可以是礼貌的疏离）；傲娇≠脸红结巴（也可以是极强的自尊心攻击性）；暴躁≠无脑狂怒（也可以是缺乏耐心的躁郁）。
 真实语境：模拟真实打字习惯，包括断句、不爱用标点（用空格代替）、非正式口语、偶尔的错别字。
 去油腻：保持成年人的社交距离感或真实亲密感，严禁悬浮的调情和“女人/男人”式的称呼。
 `,
-    // Part 4-A: 标准聊天协议 (你的原版 Part 4 - 用于普通回复)
+    // Part 4-A: 标准聊天协议
     standardProtocol: `
 4.格式强制约束与协议：
 动作描写极简：若需描写神态，仅限括号内20字以内极简描述，严禁使用形容词修饰。
@@ -279,16 +279,15 @@ JSON 结构定义如下：
 }
 【重要】：如果"replies"数组为空，会被视为系统错误。请至少回复一句话。
 `,
-    // Part 4-B: 自主行为协议 (后台生活触发专用 - 用于 triggerAiSocialAction)
+    // Part 4-B: 自主行为协议
     lifeActionProtocol: `
 4.【强制输出格式协议】：
 你必须返回一个 **JSON 对象**。严禁返回 Markdown 代码块。
 结构必须是以下四种之一：
 (1) 发起私聊: { "action": "CHAT", "content": "内容" }
-(2) 发朋友圈: { "action": "POST", "content": "文案" }
-(3) 语音电话: { "action": "CALL", "reason": "理由" } (仅在想听声音时使用)
-(4) 视频通话: { "action": "VIDEO_CALL", "reason": "理由" } (仅在用户要求看脸、或想展示自己时使用)
-(5) 无操作: { "action": "NONE" }
+(2) 语音电话: { "action": "CALL", "reason": "理由" } (仅在想听声音时使用)
+(3) 视频通话: { "action": "VIDEO_CALL", "reason": "理由" } (仅在用户要求看脸、或想展示自己时使用)
+(4) 无操作: { "action": "NONE" }
 `
 };
 
@@ -562,6 +561,45 @@ if (streamToggle) {
             if(globalData.apiModel) { const sel = document.getElementById('apiModel'); let exists = false; for(let i=0; i<sel.options.length; i++) { if(sel.options[i].value === globalData.apiModel) exists = true; } if(!exists) { const opt = document.createElement('option'); opt.value = globalData.apiModel; opt.innerText = globalData.apiModel; sel.add(opt); } sel.value = globalData.apiModel; }
             if(globalData.apiTemp) { document.getElementById('apiTemp').value = globalData.apiTemp; document.getElementById('tempDisplay').innerText = globalData.apiTemp; }
             if(globalData.apiMaxTokens) { document.getElementById('apiMaxTokens').value = globalData.apiMaxTokens; }
+            // === 载入副 API 参数与功能开关 ===
+            if (globalData.secApiEndpoint) document.getElementById('secApiEndpoint').value = globalData.secApiEndpoint;
+            if (globalData.secApiKey) document.getElementById('secApiKey').value = globalData.secApiKey;
+
+            if (globalData.secApiModel) { 
+                const sel = document.getElementById('secApiModel'); 
+                let exists = false; 
+                for(let i=0; i<sel.options.length; i++) { 
+                    if(sel.options[i].value === globalData.secApiModel) exists = true; 
+                } 
+                if(!exists) { 
+                    const opt = document.createElement('option'); 
+                    opt.value = globalData.secApiModel; 
+                    opt.innerText = globalData.secApiModel; 
+                    sel.add(opt); 
+                } 
+                sel.value = globalData.secApiModel; 
+            }
+
+            if (globalData.secApiTemp) { 
+                document.getElementById('secApiTemp').value = globalData.secApiTemp; 
+                document.getElementById('secTempDisplay').innerText = globalData.secApiTemp; 
+            }
+            if (globalData.secApiMaxTokens) { 
+                document.getElementById('secApiMaxTokens').value = globalData.secApiMaxTokens; 
+            }
+
+            // 恢复副 API 各功能的勾选开关状态
+            const secSwitches = ['secUseSummary', 'secUseForum', 'secUseCheckPhone', 'secUseDiary', 'secUseQuiz', 'secUseChat'];
+            secSwitches.forEach(switchId => {
+                const swEl = document.getElementById(switchId);
+                if (swEl) {
+                    if (globalData[switchId] === true) {
+                        swEl.classList.add('checked');
+                    } else {
+                        swEl.classList.remove('checked');
+                    }
+                }
+            });
             if(globalData.minimaxGroupId) document.getElementById('minimaxGroupId').value = globalData.minimaxGroupId;
             if(globalData.minimaxApiKey) document.getElementById('minimaxApiKey').value = globalData.minimaxApiKey;
             if(globalData.minimaxModel) document.getElementById('minimaxModel').value = globalData.minimaxModel;
@@ -722,10 +760,14 @@ function syncForumData() {
     // 4. 同步“我”的头像
     const myAvatar = document.getElementById('meAvatarImg')?.src;
     if (myAvatar) {
-        localStorage.setItem("avatarImg", myAvatar);
+        try {
+            localStorage.setItem("avatarImg", myAvatar);
+        } catch (e) {
+            console.warn("[Storage] 同步头像至 localStorage 失败，可能超出了存储限额 (QuotaExceededError):", e);
+        }
     }
     
-    console.log("✅ 论坛数据同步完成，共同步角色:", window.characters.length);
+    console.log("论坛数据同步完成，共同步角色:", window.characters.length);
 }
 
 // 定义论坛需要的关闭函数 (论坛内部按钮会调用这个)
@@ -821,6 +863,19 @@ async function saveData() {
          autoFreq: globalData.autoFreq,         
          apiStreamEnabled: document.getElementById('apiStreamToggle')?.classList.contains('checked'),
          apiMaxTokens: safeGetValue('apiMaxTokens') || 2048,
+         // === 保存副 API 配置与功能开关 ===
+        secApiEndpoint: safeGetValue('secApiEndpoint'),
+        secApiKey: safeGetValue('secApiKey'),
+        secApiModel: safeGetValue('secApiModel'),
+        secApiTemp: safeGetValue('secApiTemp', '1.0'),
+        secApiMaxTokens: safeGetValue('secApiMaxTokens', '2048'),
+
+        secUseSummary: document.getElementById('secUseSummary')?.classList.contains('checked') || false,
+        secUseForum: document.getElementById('secUseForum')?.classList.contains('checked') || false,
+        secUseCheckPhone: document.getElementById('secUseCheckPhone')?.classList.contains('checked') || false,
+        secUseDiary: document.getElementById('secUseDiary')?.classList.contains('checked') || false,
+        secUseQuiz: document.getElementById('secUseQuiz')?.classList.contains('checked') || false,
+        secUseChat: document.getElementById('secUseChat')?.classList.contains('checked') || false,
          autoAllowedCharIds: globalData.autoAllowedCharIds || [],
          naiEnabled: document.getElementById('naiToggle')?.classList.contains('checked'),
         naiApiKey: safeGetValue('naiApiKey'),
@@ -1773,10 +1828,11 @@ function renderMessages(chat) {
     
     const msgsToRender = chat.messages.slice(startIndex);
 
+    let lastDateStr = ""; 
     let lastTimeMinutes = -9999; 
     let lastSenderType = null; 
 
-    msgsToRender.forEach((msg, relativeIndex) => { 
+    msgsToRender.forEach((msg, relativeIndex) => {
         const realIndex = startIndex + relativeIndex;
         if (msg.isHidden) return;
         if (msg.text && msg.text.includes('[邀请语音通话]')) return;
@@ -1786,12 +1842,12 @@ function renderMessages(chat) {
         // --- 1. 动态跨天与点击切换的时间线逻辑 ---
         const [hh, mm] = (msg.time || "00:00").split(':').map(Number);
         const currentMinutes = hh * 60 + mm; 
-        const currentDateStr = msg.virtualDate || "Today"; 
+        const currentDateStr = msg.virtualDate || nowVirtualDate; 
 
         if (relativeIndex === 0 || 
-            currentDateStr !== chat._lastRenderDate || 
-            (currentDateStr === chat._lastRenderDate && currentMinutes - lastTimeMinutes > 60) || 
-            (currentDateStr === chat._lastRenderDate && currentMinutes < lastTimeMinutes)) { 
+            currentDateStr !== lastDateStr || 
+            (currentDateStr === lastDateStr && currentMinutes - lastTimeMinutes > 60) || 
+            (currentDateStr === lastDateStr && currentMinutes < lastTimeMinutes)) { 
             
             const dateDiv = document.createElement('div'); 
             dateDiv.className = 'date-divider'; 
@@ -1823,8 +1879,7 @@ function renderMessages(chat) {
             lastSenderType = null; 
         } 
         lastTimeMinutes = currentMinutes; 
-        chat._lastRenderDate = currentDateStr;
-
+        lastDateStr = currentDateStr; 
         // --- 撤回逻辑 ---
         const isAiPureCommand = (!msg.isSelf && msg.text.trim() === '[WITHDRAWN]');
         if (msg.isRecalled || isAiPureCommand) {
@@ -2047,7 +2102,9 @@ if (isSelf) {
                 startY = e.touches[0].clientY;
                 pressTimer = setTimeout(() => {
                     e.preventDefault(); 
-                    if (navigator.vibrate) navigator.vibrate(15);
+                    if (navigator.vibrate) {
+                        try { navigator.vibrate(15); } catch(err) {}
+                    }
                     showMsgMenu(bubbleNode, realIndex, isSelf); 
                 }, 500);
             }, { passive: false });
@@ -2094,7 +2151,10 @@ function openChatSettings() {
 
         document.getElementById('charVoiceId').value = chat.minimaxVoiceId || '';
 
-        
+        // 回填自定义回复条数限制，若未设置则默认为 1 - 3 条
+        document.getElementById('charReplyMin').value = chat.replyMin !== undefined ? chat.replyMin : 1;
+        document.getElementById('charReplyMax').value = chat.replyMax !== undefined ? chat.replyMax : 3;
+
         // --- 双轨时区数据回填 ---
         document.getElementById('charTimezone').value = chat.charTimezone || 'Asia/Shanghai';
         document.getElementById('userTimezone').value = chat.userTimezone || 'Asia/Shanghai';
@@ -2208,6 +2268,17 @@ chat.showUserAvatar = document.getElementById('toggleUserAvatar').classList.cont
     chat.userPersona = document.getElementById('userPersona').value;
 
     chat.minimaxVoiceId = document.getElementById('charVoiceId').value.trim();
+
+    // 保存自定义回复条数限制
+    let rMin = parseInt(document.getElementById('charReplyMin').value);
+    let rMax = parseInt(document.getElementById('charReplyMax').value);
+    
+    // 防呆设计：确保输入值有效，且最小值不低于1，最大值不小于最小值
+    if (isNaN(rMin) || rMin < 1) rMin = 1;
+    if (isNaN(rMax) || rMax < rMin) rMax = Math.max(rMin, 3);
+    
+    chat.replyMin = rMin;
+    chat.replyMax = rMax;
 
     // --- 双轨时区数据保存 ---
     chat.charTimezone = document.getElementById('charTimezone').value;
@@ -2698,6 +2769,128 @@ async function fetchModels() {
         btn.style.opacity = '1';
     }
 }
+
+// ★★★ 新增：拉取副 API 模型列表 ★★★
+async function fetchSecModels() {
+    let endpoint = document.getElementById('secApiEndpoint').value.trim().replace(/\/+$/, '');
+    const key = document.getElementById('secApiKey').value.trim();
+    const modelSelect = document.getElementById('secApiModel');
+    const blacklist = ['api520.pro', 'api521.pro']; 
+    
+    if (blacklist.some(domain => endpoint.includes(domain))) {
+        alert("安全限制：无法访问此 API 域名。");
+        return;
+    }
+    if (!endpoint || !key) { 
+        alert('请先填写副 API Endpoint 和 Key'); 
+        return; 
+    }
+
+    const btn = document.getElementById('secModelFetchBtn');
+    const originalText = btn.innerText;
+    btn.innerText = '拉取中...';
+    btn.style.opacity = '0.7';
+
+    try {
+        const response = await fetch(`${endpoint}/models`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${key}`,
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`API 报错: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        modelSelect.innerHTML = '';
+
+        let models = [];
+        if (Array.isArray(data.data)) models = data.data;
+        else if (Array.isArray(data.models)) models = data.models;
+        else if (Array.isArray(data)) models = data;
+
+        if (models.length > 0) {
+            models.forEach(model => {
+                const modelId = model.id || model.name || model;
+                const option = document.createElement('option');
+                option.value = modelId;
+                option.innerText = modelId;
+                modelSelect.appendChild(option);
+            });
+            alert(`成功拉取副 API 共 ${models.length} 个模型！`);
+            saveData(); 
+        } else {
+            alert('拉取成功但模型列表为空');
+        }
+    } catch (error) {
+        console.error(error);
+        alert('副 API 模型拉取失败: ' + error.message);
+    } finally {
+        btn.innerText = originalText;
+        btn.style.opacity = '1';
+    }
+}
+
+/**
+ * ★★★ 中央 API 分发器 (严格隔离版) ★★★
+ * 传入功能名称，自动计算并返回相应的 API 配置。
+ * 只要功能勾选了副 API，就绝对不向下回退到主 API。
+ */
+window.getApiCredentials = function(featureName) {
+    // 1. 获取主 API 参数
+    const primEndpoint = document.getElementById('apiEndpoint')?.value.trim() || globalData.apiEndpoint || "";
+    const primKey = document.getElementById('apiKey')?.value.trim() || globalData.apiKey || "";
+    const primModel = document.getElementById('apiModel')?.value || globalData.apiModel || "";
+    const primTemp = parseFloat(document.getElementById('apiTemp')?.value) || parseFloat(globalData.apiTemp) || 1.0;
+    const primMaxTokens = parseInt(document.getElementById('apiMaxTokens')?.value) || parseInt(globalData.apiMaxTokens) || 2048;
+
+    // 2. 获取副 API 参数
+    const secEndpoint = document.getElementById('secApiEndpoint')?.value.trim() || globalData.secApiEndpoint || "";
+    const secKey = document.getElementById('secApiKey')?.value.trim() || globalData.secApiKey || "";
+    const secModel = document.getElementById('secApiModel')?.value || globalData.secApiModel || "";
+    const secTemp = parseFloat(document.getElementById('secApiTemp')?.value) || parseFloat(globalData.secApiTemp) || 1.0;
+    const secMaxTokens = parseInt(document.getElementById('secApiMaxTokens')?.value) || parseInt(globalData.secApiMaxTokens) || 2048;
+
+    // 3. 判断当前功能是否勾选了副 API
+    const featureSwitchMap = {
+        'chat': 'secUseChat',
+        'summary': 'secUseSummary',
+        'diary': 'secUseDiary',
+        'quiz': 'secUseQuiz',
+        'forum': 'secUseForum',
+        'check_phone': 'secUseCheckPhone'
+    };
+
+    const switchId = featureSwitchMap[featureName];
+    const isSecEnabled = switchId ? (document.getElementById(switchId)?.classList.contains('checked') || globalData[switchId] === true) : false;
+
+    // 【严格隔离逻辑】：只要勾选了副 API，直接返回副 API 配置（即便未配置完整也会直接返回，以便请求时报错，实现绝对不向下回退）。
+    if (isSecEnabled) {
+        return {
+            endpoint: secEndpoint,
+            key: secKey,
+            model: secModel,
+            temperature: secTemp,
+            maxTokens: secMaxTokens,
+            isSecondary: true
+        };
+    }
+
+    // 未勾选时，继续使用主 API
+    return {
+        endpoint: primEndpoint,
+        key: primKey,
+        model: primModel,
+        temperature: primTemp,
+        maxTokens: primMaxTokens,
+        isSecondary: false
+    };
+};
+
 async function saveCurrentConfig() { const name = document.getElementById('configName').value.trim(); if (!name) { alert('请输入方案名称'); return; } const profile = { id: Date.now(), name: name, endpoint: document.getElementById('apiEndpoint').value, key: document.getElementById('apiKey').value, model: document.getElementById('apiModel').value, temp: document.getElementById('apiTemp').value }; apiProfiles.push(profile); await db.apiConfig.put(profile); renderApiProfiles(); document.getElementById('configName').value = ''; }
 async function deleteProfile(index) { if(confirm('确定删除该方案吗？')) { const id = apiProfiles[index].id; apiProfiles.splice(index, 1); await db.apiConfig.delete(id); renderApiProfiles(); } }
 function loadProfile(index) { const p = apiProfiles[index]; document.getElementById('apiEndpoint').value = p.endpoint; document.getElementById('apiKey').value = p.key; const sel = document.getElementById('apiModel'); let exists = false; for(let i=0; i<sel.options.length; i++) { if(sel.options[i].value === p.model) exists = true; } if(!exists) { const opt = document.createElement('option'); opt.value = p.model; opt.innerText = p.model; sel.add(opt); } sel.value = p.model; document.getElementById('apiTemp').value = p.temp; document.getElementById('tempDisplay').innerText = p.temp; saveData(); alert(`已加载方案: ${p.name}`); }
@@ -3263,6 +3456,16 @@ async function confirmAddChar() {
         
         chatList.push(newItem); 
         await db.chats.add(newItem); 
+
+        // 自动将新创建的角色加入后台允许列表，防止活动权限处于未激活状态
+        if (!globalData) globalData = {};
+        if (!globalData.autoAllowedCharIds) {
+            globalData.autoAllowedCharIds = [];
+        }
+        if (!globalData.autoAllowedCharIds.includes(newItem.id)) {
+            globalData.autoAllowedCharIds.push(newItem.id);
+        }
+        await saveData();
     }
     
     tempSelectedMaskId = null;
@@ -3540,7 +3743,9 @@ function updateSummaryContent(index, newContent) {
         updateMemStats(chat);
         
         // 可选：给个轻微震动反馈
-        if(navigator.vibrate) navigator.vibrate(10);
+        if(navigator.vibrate) {
+            try { navigator.vibrate(10); } catch(err) {}
+        }
     }
 }
 
@@ -3648,11 +3853,14 @@ async function triggerRangeSummary() {
     }
 }
 
-// 【修复版】执行总结 API
 async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
-    const endpoint = document.getElementById('apiEndpoint').value;
-    const key = document.getElementById('apiKey').value;
-    const model = document.getElementById('apiModel').value;
+    // 使用中央路由分流
+    const apiConfig = window.getApiCredentials('summary');
+    const endpoint = apiConfig.endpoint;
+    const key = apiConfig.key;
+    const model = apiConfig.model;
+    const maxTokens = apiConfig.maxTokens;
+    const temperature = apiConfig.temperature;
 
     if (!key) throw new Error("缺少 API Key");
     
@@ -4138,12 +4346,13 @@ function getWorldBookContext(chat, checkText = "") {
 async function generateAiReply(chat, isRegenerate = false) {
     if (!chat) return;
 
-    // 1. 获取配置
-    const endpoint = document.getElementById('apiEndpoint').value;
-    const key = document.getElementById('apiKey').value;
-    const model = document.getElementById('apiModel').value;
-    const temp = parseFloat(document.getElementById('apiTemp').value) || 1.0;
-    const maxTokens = parseInt(document.getElementById('apiMaxTokens').value) || 2048;
+    // 使用中央路由分流
+    const apiConfig = window.getApiCredentials('chat');
+    const endpoint = apiConfig.endpoint;
+    const key = apiConfig.key;
+    const model = apiConfig.model;
+    const temp = apiConfig.temperature;
+    const maxTokens = apiConfig.maxTokens;
 
     if (!key) { alert("请先在 API 配置中填写 Key"); return; }
 
@@ -4233,6 +4442,11 @@ async function generateAiReply(chat, isRegenerate = false) {
     if (typeof getVirtualTimePrompt === 'function') {
         systemPrompt += getVirtualTimePrompt(chat);
     }
+
+    // [新增] 限制生成的消息数量
+    const replyMin = chat.replyMin !== undefined ? chat.replyMin : 1;
+    const replyMax = chat.replyMax !== undefined ? chat.replyMax : 3;
+    systemPrompt += `\n【重要：单次消息数量限制】：你当前发送的消息段落（replies 数组的长度）必须控制在 ${replyMin} 到 ${replyMax} 条之间。请根据当前的情感波动和氛围，在这个范围内选择最自然的条数。`;
 
     if (typeof isPlaying !== 'undefined' && isPlaying && currentMusicIndex !== -1 && musicPlaylist[currentMusicIndex]) {
         const track = musicPlaylist[currentMusicIndex];
@@ -4686,6 +4900,11 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
             return [String(s)];
         });
 
+        // [新增] 强制物理截断防溢出
+        if (segments.length > replyMax) {
+            segments = segments.slice(0, replyMax);
+        }
+
         if (document.getElementById('roomTitle') && currentChatId === chat.id) {
             document.getElementById('roomTitle').innerText = chat.name;
         }
@@ -4713,6 +4932,13 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
                 const parts = rawSegment.split(TRANS_SPLIT);
                 mainText = parts[0].trim();
                 transText = parts[1] ? parts[1].trim() : null;
+            }
+
+            // 【新增修复】强力清洗开头可能被 AI 误带上的虚拟时间戳前缀
+            const timeStampRegex = /^[\[【](?:\d{2}-\d{2}|Today)\s+\d{2}:\d{2}[\]】]\s*/i;
+            mainText = mainText.replace(timeStampRegex, '');
+            if (transText) {
+                transText = transText.replace(timeStampRegex, '');
             }
 
             if (window.aiCommandProcessors) {
@@ -5173,6 +5399,12 @@ const blockMatch = mainText.match(/\[\s*BLOCK_USER\s*\]/i);
         chat.lastSeenMomentTime = Date.now(); 
         saveData();
 
+        if (typeof evaluateSpontaneousMomentsAfterChat === 'function') {
+                setTimeout(() => {
+                    evaluateSpontaneousMomentsAfterChat(chat).catch(e => console.error("[Mood Social] Error:", e));
+                }, 4000); 
+            }
+
     } catch (error) { 
         console.error(error);
         
@@ -5300,18 +5532,19 @@ function sendSticker(src) {
     if (!currentChatId) return;
     const chat = chatList.find(c => c.id === currentChatId);
     if (chat) {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        const vt = window.getVirtualTimeData(chat, true);
         
-        // 插入 HTML 图片标签
         chat.messages.push({ 
             text: `<img src="${src}" class="chat-sticker-img">`, 
             isSelf: true, 
-            time: timeStr 
+            time: vt.timeStr,
+            virtualDate: vt.dateStr,
+            virtualTimestamp: vt.ms,
+            timestamp: Date.now()
         });
         
         chat.msg = '[表情]';
-        chat.time = timeStr;
+        chat.time = vt.timeStr;
         
         if (!chat.isPinned) {
             chatList = chatList.filter(c => c.id !== currentChatId);
@@ -5358,39 +5591,41 @@ function sendVoicePopup() {
     }
 
     const chat = chatList.find(c => c.id === currentChatId);
-    if (chat) {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        
-        // 计算时长显示
-        const duration = Math.min(60, Math.max(1, Math.ceil(text.length / 3)));
+            if (chat) {
+                const vt = window.getVirtualTimeData(chat, true);
+                
+                // 计算时长显示
+                const duration = Math.min(60, Math.max(1, Math.ceil(text.length / 3)));
 
-        // ★★★ 替换整个 voiceHtml 变量的定义 ★★★
-const voiceHtml = `
-    <div class="voice-inner-container" onclick="toggleVoiceText(this, event)">
-        <div class="voice-main-row">
-            <div class="voice-animate-icon">
-                <div class="voice-line"></div>
-                <div class="voice-line"></div>
-                <div class="voice-line"></div>
-                <div class="voice-line"></div>
+                // ★★★ 替换整个 voiceHtml 变量的定义 ★★★
+        const voiceHtml = `
+            <div class="voice-inner-container" onclick="toggleVoiceText(this, event)">
+                <div class="voice-main-row">
+                    <div class="voice-animate-icon">
+                        <div class="voice-line"></div>
+                        <div class="voice-line"></div>
+                        <div class="voice-line"></div>
+                        <div class="voice-line"></div>
+                    </div>
+                    <span class="voice-duration">${duration}"</span>
+                </div>
+                <div class="voice-trans-result">${text}</div>
             </div>
-            <span class="voice-duration">${duration}"</span>
-        </div>
-        <div class="voice-trans-result">${text}</div>
-    </div>
-`;
+        `;
 
 
-        chat.messages.push({
-            text: voiceHtml,
-            isSelf: true,
-            time: timeStr,
-            contentDescription: `[语音消息：${text}]` // 让AI能听懂
-        });
+                chat.messages.push({
+                    text: voiceHtml,
+                    isSelf: true,
+                    time: vt.timeStr,
+                    virtualDate: vt.dateStr,
+                    virtualTimestamp: vt.ms,
+                    timestamp: Date.now(),
+                    contentDescription: `[语音消息：${text}]`
+                });
 
-        chat.msg = '[语音]';
-        chat.time = timeStr;
+                chat.msg = '[语音]';
+                chat.time = vt.timeStr;
 
         saveData();
         renderMessages(chat);
@@ -6665,13 +6900,16 @@ function sendStickerMsg(sticker) {
     if (!currentChatId) return;
     const chat = chatList.find(c => c.id === currentChatId);
     if (chat) {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        // 【新增修复】统一使用虚拟时间快照
+        const vt = window.getVirtualTimeData(chat, true);
         
         chat.messages.push({ 
             text: `<img src="${sticker.src}" class="chat-sticker-img">`, 
             isSelf: true, 
-            time: timeStr,
+            time: vt.timeStr,
+            virtualDate: vt.dateStr,
+            virtualTimestamp: vt.ms,
+            timestamp: Date.now(),
             contentDescription: `[发送了一个表情：${sticker.name}]` 
         });
         
@@ -6742,7 +6980,9 @@ function showMsgMenu(element, index, isSelf) {
     activeMsgIndex = index;
     activeMsgElement = element;
     
-    if (navigator.vibrate) navigator.vibrate(15);
+    if (navigator.vibrate) {
+        try { navigator.vibrate(15); } catch(err) {}
+    }
 
     const rect = element.getBoundingClientRect();
     
@@ -7693,9 +7933,11 @@ async function triggerDiaryGeneration() {
     const chat = chatList.find(c => c.id === currentDiaryTargetId);
     if (!chat) return;
 
-    const apiKey = document.getElementById('apiKey').value;
-    const endpoint = document.getElementById('apiEndpoint').value; 
-    const model = document.getElementById('apiModel').value; 
+    // 使用中央路由分流
+    const apiConfig = window.getApiCredentials('diary');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
 
     if (!apiKey) { alert("请先配置 API Key"); return; }
 
@@ -7915,19 +8157,20 @@ function sendPhotoMsg() {
 
     const chat = chatList.find(c => c.id === currentChatId);
     if (chat) {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        const vt = window.getVirtualTimeData(chat, true);
         
         chat.messages.push({
             text: photoHtml,
             isSelf: true,
-            time: timeStr,
+            time: vt.timeStr,
+            virtualDate: vt.dateStr,
+            virtualTimestamp: vt.ms,
             contentDescription: `[发送了照片：${displayDesc}]`,
             timestamp: Date.now()
         });
 
         chat.msg = '[照片]';
-        chat.time = timeStr;
+        chat.time = vt.timeStr;
 
         if (!chat.isPinned) {
             chatList = chatList.filter(c => c.id !== currentChatId);
@@ -7972,21 +8215,22 @@ function sendDirectPhoto(imgUrl) {
     const chat = chatList.find(c => c.id === currentChatId);
     
     if (chat) {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        const vt = window.getVirtualTimeData(chat, true);
         const displayDesc = "图片"; 
         const photoHtml = `<img src="${imgUrl}" class="album-msg-img" data-desc="${displayDesc}">`;
 
         chat.messages.push({
             text: photoHtml,
             isSelf: true,
-            time: timeStr,
+            time: vt.timeStr,
+            virtualDate: vt.dateStr,
+            virtualTimestamp: vt.ms,
             contentDescription: `[发送了一张图片]`,
             timestamp: Date.now()
         });
 
         chat.msg = '[图片]';
-        chat.time = timeStr;
+        chat.time = vt.timeStr;
 
         if (!chat.isPinned) {
             chatList = chatList.filter(c => c.id !== currentChatId);
@@ -8343,6 +8587,10 @@ function confirmPublishMoment() {
     saveMomentsToDB();
     renderMomentFeed();
     closeMomentPublish();
+
+    if (typeof triggerAllAiCommentsOnUserPost === 'function') {
+        triggerAllAiCommentsOnUserPost(newMoment);
+    }
 }
 
 // --- 互动 (点赞/删除) ---
@@ -8390,51 +8638,36 @@ async function simulateCharacterLife() {
     console.log("[后台] 正在检查角色生活状态...");
     const now = Date.now();
 
-    // 2. 获取频率设置 (毫秒)
-    // 0=6h, 1=3h, 2=1h
     let intervalMs = 6 * 60 * 60 * 1000; // 默认低频
     const freqSetting = globalData.autoFreq || 0;
     
-    if (freqSetting === 1) intervalMs = 3 * 60 * 60 * 1000; // 中频
-    if (freqSetting === 2) intervalMs = 1 * 60 * 60 * 1000; // 高频
+    if (freqSetting === 1) intervalMs = 3 * 60 * 60 * 1000;
+    if (freqSetting === 2) intervalMs = 1 * 60 * 60 * 1000;
 
-    // 3. 获取允许的角色列表
     const allowedIds = globalData.autoAllowedCharIds || [];
 
-    // 4. 遍历所有角色
     for (const chat of chatList) {
-        // 如果该角色没被勾选，直接跳过
         if (!allowedIds.includes(chat.id)) continue;
 
-        // --- 轨道 A: 朋友圈互动检查 (独立轨道) ---
-        // 逻辑：只要有未评论的“用户新动态”，就有概率触发评论，不看时间间隔，只看有没有新素材
-        // 为了防止太频繁，我们在每次心跳中只有 30% 概率检查这个，或者你可以设为 100%
-        if (Math.random() < 0.5) { 
-            await triggerAiMomentInteraction(chat);
-        }
-
-        // --- 轨道 B: 核心生活/聊天检查 (原有轨道) ---
-        // 获取上次发动态或说话的时间
+        // --- 轨道 B: 仅保留私聊/通话的生活检查 ---
         const lastActionTime = chat.lastMomentTime || 0;
         const timeDiff = now - lastActionTime;
 
-        // ★ 核心判定：是否达到时间间隔
         if (timeDiff >= intervalMs) {
-            // 增加一点随机性，避免所有人同时说话
             if (timeDiff > (intervalMs * 1.5) || Math.random() < 0.4) {
-                console.log(`[后台] ${chat.name} 触发生活行为 (Chat/Post/Call)`);
+                console.log(`[后台] ${chat.name} 触发生活行为 (Chat/Call)`);
                 await triggerAiSocialAction(chat, 'life');
             }
         }
     }
 }
 
-// ★★★ 新增：专门负责处理朋友圈互动的函数 ★★★
-// 这个函数只负责“评论”或“点赞”，绝不发消息，不占用发消息的 CD
 async function triggerAiMomentInteraction(chat) {
-    const apiKey = document.getElementById('apiKey').value;
-    const endpoint = document.getElementById('apiEndpoint').value;
-    const model = document.getElementById('apiModel').value;
+    // 使用中央路由分流 (分类归入论坛/动态模块)
+    const apiConfig = window.getApiCredentials('forum');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
     
     if (!apiKey) return;
 
@@ -8528,9 +8761,11 @@ ${momentsText}
 // ★★★ 修复版：AI 自主生活行为系统 (引用版) ★★★
 // =========================================
 async function triggerAiSocialAction(chat, source = 'chat') {
-    const apiKey = document.getElementById('apiKey').value;
-    const endpoint = document.getElementById('apiEndpoint').value;
-    const model = document.getElementById('apiModel').value;
+    // 使用中央路由分流
+    const apiConfig = window.getApiCredentials('chat');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
     
     if (!apiKey) return;
 
@@ -8585,7 +8820,7 @@ async function triggerAiSocialAction(chat, source = 'chat') {
 
     
     // ★★★ 核心：这里直接引用了全局变量，代码清爽多了 ★★★
-    const systemPrompt = `
+     let systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
 ${PROMPT_LIB.antiStereotype}
@@ -8642,8 +8877,12 @@ if (typeof getVirtualTimePrompt === 'function') {
             const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
             
             const rawSegments = result.content.split(/\n+/).map(s => s.trim()).filter(s => s);
+            
+            // [新增] 限制自主发送时的气泡数量上限
+            const replyMax_action = chat.replyMax !== undefined ? chat.replyMax : 3;
+            const limitedSegments = rawSegments.slice(0, replyMax_action);
 
-            for (let rawText of rawSegments) {
+            for (let rawText of limitedSegments) {
                 let mainText = rawText;
                 
                 // --- 复制之前的正则解析逻辑 (VOICE/PHOTO/STICKER) ---
@@ -8959,6 +9198,34 @@ function submitInlineComment(momentId, replyName, text) {
     renderMomentFeed(); 
     
     currentInlineInputId = null;
+
+    // =========================================================================
+    // ★ 修复并升级：双轨评论区盖楼拉扯逻辑
+    // =========================================================================
+    if (replyName) {
+        // 【情况 A】: 嵌套回复（点击了 AI 的子评论进行回复）
+        const targetChat = chatList.find(c => c.name === replyName || c.realName === replyName);
+        if (targetChat && Math.random() < 0.75) {
+            const delay = 3000 + Math.random() * 4000;
+            console.log(`[评论区] ${targetChat.name} 正在准备回复你的评论...`);
+            setTimeout(() => {
+                triggerAiCommentReply(targetChat, moment, content).catch(e => console.error("[Comment Reply] Error:", e));
+            }, delay);
+        }
+    } else {
+        // 【情况 B】: 直接留言（在 AI 的动态下直接点“评论”留言）
+        // 如果这篇动态的原作者不是“我”，说明是某个 AI 发的，此时该 AI 原作者会准备回复你
+        if (moment.userId !== 'me') {
+            const targetChat = chatList.find(c => c.id == moment.userId || c.name === moment.userName);
+            if (targetChat && Math.random() < 0.75) {
+                const delay = 3000 + Math.random() * 4000;
+                console.log(`[评论区互动] 动态作者 ${targetChat.name} 正在准备回复你的直接评论...`);
+                setTimeout(() => {
+                    triggerAiCommentReply(targetChat, moment, content).catch(e => console.error("[Comment Reply] Error:", e));
+                }, delay);
+            }
+        }
+    }
 }
 
 // ★★★ 新增：删除评论逻辑 ★★★
@@ -9322,8 +9589,7 @@ function confirmSendTransfer() {
     const chat = chatList.find(c => c.id === currentChatId);
     if (!chat) return;
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const vt = window.getVirtualTimeData(chat, true);
     const amountFixed = parseFloat(amountVal).toFixed(2);
     if (typeof handleTransaction === 'function') {
         handleTransaction('expense', parseFloat(amountVal), `转账 - ${chat.name}`);
@@ -9333,7 +9599,9 @@ function confirmSendTransfer() {
         id: Date.now(),
         type: 'transfer', // 标记类型
         isSelf: true,     // 我发的
-        time: timeStr,
+        time: vt.timeStr,
+        virtualDate: vt.dateStr,
+        virtualTimestamp: vt.ms,
         timestamp: Date.now(),
         amount: amountFixed,
         note: noteVal,
@@ -9345,7 +9613,7 @@ function confirmSendTransfer() {
 
     chat.messages.push(msg);
     chat.msg = `[转账] ¥${amountFixed}`;
-    chat.time = timeStr;
+    chat.time = vt.timeStr;
     
     // 置顶聊天
     if (!chat.isPinned) {
@@ -9558,17 +9826,14 @@ function startVoiceCallUI() {
     }, 1500);
 }
 
-// ★★★ 新增：挂断电话并结算时长 ★★★
+// 找到 hangUpVoiceCall 函数，修改其内部的时间戳逻辑：
 function hangUpVoiceCall() {
-    // 1. 停止计时
     if (vcTimerInterval) clearInterval(vcTimerInterval);
     
-    // ★★★ 修改：使用 activeVoiceCallChatId 来查找角色，防止你不在聊天室时挂断报错 ★★★
     const targetId = activeVoiceCallChatId || currentChatId;
     const chat = chatList.find(c => c.id === targetId);
     
     if (chat) {
-        // 2. 计算时长字符串
         const hours = Math.floor(vcSeconds / 3600);
         const minutes = Math.floor((vcSeconds % 3600) / 60);
         const seconds = vcSeconds % 60;
@@ -9577,39 +9842,33 @@ function hangUpVoiceCall() {
         if (hours > 0) durationText = `${hours}小时${minutes}分`;
         else durationText = `${minutes}分${seconds}秒`;
         
-        // 3. 插入记录
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        // ★ 核心重构：使用虚拟时间快照
+        const vt = window.getVirtualTimeData(chat, true);
         
         chat.messages.push({
             text: `通话时长 ${durationText}`,
             isSelf: true, 
-            time: timeStr,
+            time: vt.timeStr,
+            virtualDate: vt.dateStr,
+            virtualTimestamp: vt.ms,
             timestamp: Date.now(),
             type: 'call_summary' 
         });
         
-        // 更新列表预览
         chat.msg = `[通话结束] ${durationText}`;
-        chat.time = timeStr;
+        chat.time = vt.timeStr;
         
         saveData();
         
-        // ★★★ 只有当用户真的在这个聊天室里时，才刷新消息界面 ★★★
         if (currentChatId === chat.id) {
             renderMessages(chat); 
         }
     }
     
-    // 4. 关闭界面
     document.getElementById('voice-call-overlay').classList.remove('active');
     document.getElementById('vc-floating-window').style.display = 'none';
-    
-    // 5. 恢复状态
     isVcConnecting = false;
     vcSeconds = 0;
-    
-    // ★★★ 最后一步：清空通话锁定ID ★★★
     activeVoiceCallChatId = null;
 }
 
@@ -9665,7 +9924,7 @@ async function triggerVcFirstMessage(chat) {
     const isInstantCall = (now - lastMsgTime) < 5 * 60 * 1000; 
 
     // ★★★ 强制 JSON 协议 ★★★
-    const systemPrompt = `
+    let systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
 ${PROMPT_LIB.antiStereotype}
@@ -9689,6 +9948,12 @@ ${globalData.autoTranslateEnabled ? `4. 【⚠️翻译强制协议】：每一�
     if (typeof getVirtualTimePrompt === 'function') {
         systemPrompt += getVirtualTimePrompt(chat);
     }
+
+    // [新增] 限制自主聊天的消息数量
+    const replyMin_action = chat.replyMin !== undefined ? chat.replyMin : 1;
+    const replyMax_action = chat.replyMax !== undefined ? chat.replyMax : 3;
+    systemPrompt += `\n【重要：单次消息数量限制】：如果你决定发起私聊（CHAT 行为），你当前发送的消息段落（以换行隔开）必须控制在 ${replyMin_action} 到 ${replyMax_action} 条之间。`;
+
     try {
         const apiKey = document.getElementById('apiKey').value;
         const endpoint = document.getElementById('apiEndpoint').value;
@@ -9827,21 +10092,22 @@ function handleVcEnter(e) {
     }
 }
 
-// 辅助：存入历史
+// 找到 saveToHistory 函数并替换：
 function saveToHistory(chat, text, isSelf) {
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    // ★ 核心重构：根据说话方身份获取对应的虚拟时间快照
+    const vt = window.getVirtualTimeData(chat, isSelf);
     
     chat.messages.push({
-        text: `[语音通话] ${text}`, // 加个标记，让主界面知道这是通话内容
+        text: `[语音通话] ${text}`,
         isSelf: isSelf,
-        time: timeStr,
+        time: vt.timeStr,
+        virtualDate: vt.dateStr,
+        virtualTimestamp: vt.ms,
         timestamp: Date.now(),
         isHidden: true
     });
-    // 更新列表预览
     chat.msg = '[语音通话中]';
-    chat.time = timeStr;
+    chat.time = vt.timeStr;
     saveData();
 }
 
@@ -9879,7 +10145,7 @@ async function generateVcReply(chat, userText) {
     const recentChat = getCleanChatContext(chat, 15);
     const wbContext = typeof getWorldBookContext === 'function' ? getWorldBookContext(chat, userText) : "";
 
-    const systemPrompt = `
+    let systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
 ${PROMPT_LIB.antiStereotype}
@@ -9903,6 +10169,7 @@ ${globalData.autoTranslateEnabled ? `4. 【⚠️翻译强制协议】：每一�
 if (typeof getVirtualTimePrompt === 'function') {
         systemPrompt += getVirtualTimePrompt(chat);
     }
+
     try {
         const response = await fetch(`${endpoint}/chat/completions`, {
             method: 'POST',
@@ -9998,7 +10265,9 @@ function showIncomingCallModal(chat, reason, callType = 'voice') {
     document.getElementById('ic-reason').innerText = reason || (callType === 'video' ? "想和你视频通话..." : "想听听你的声音...");
     
     document.getElementById('incoming-call-overlay').classList.add('show');
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    if (navigator.vibrate) {
+        try { navigator.vibrate([200, 100, 200]); } catch(err) {}
+    }
 }
 
 function acceptIncomingCall() {
@@ -10015,30 +10284,30 @@ function acceptIncomingCall() {
     }
 }
 
-// 3. 挂断
 function rejectIncomingCall() {
     document.getElementById('incoming-call-overlay').classList.remove('show');
     
     if (tempIncomingChatId) {
         const chat = chatList.find(c => c.id === tempIncomingChatId);
         if (chat) {
-            const now = new Date();
-            const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            // ★ 核心重构：获取虚拟时间快照
+            const vt = window.getVirtualTimeData(chat, true);
             
-            // 插入一条“已拒绝”的消息记录
             chat.messages.push({
                 text: "已拒绝通话",
                 isSelf: true,
-                time: timeStr,
+                time: vt.timeStr,
+                virtualDate: vt.dateStr,
+                virtualTimestamp: vt.ms,
                 timestamp: Date.now()
             });
             saveData();
-            // 如果正好在看列表，刷新一下
             if (currentChatId === chat.id) renderMessages(chat);
         }
     }
     tempIncomingChatId = null;
 }
+
 // --- 新增：消息通知弹窗逻辑 ---
 let currentToastTimer = null;
 let currentToastChatId = null; // 记录弹窗是哪个角色的
@@ -10064,7 +10333,13 @@ async function showNotification(chat, text) {
         msgEl.innerText = cleanText;
         avatarEl.src = chat.avatar;
         toast.classList.add('show');
-        if(navigator.vibrate) navigator.vibrate(15);
+        if(navigator.vibrate) {
+            try {
+                navigator.vibrate(15);
+            } catch (e) {
+                console.warn("[Intervention] navigator.vibrate 在 showNotification 中被拦截 (用户尚未交互):", e);
+            }
+        }
         if (currentToastTimer) clearTimeout(currentToastTimer);
         currentToastTimer = setTimeout(() => {
             toast.classList.remove('show');
@@ -10429,15 +10704,16 @@ function confirmSendRelativeCard() {
         handleTransaction('expense', parseFloat(amountVal), `赠送亲属卡 - ${chat.name}`);
     }
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const vt = window.getVirtualTimeData(chat, true);
     
     // 构造亲属卡消息
     const msg = {
         id: Date.now(),
         type: 'relative_card', // 专门的类型
         isSelf: true,
-        time: timeStr,
+        time: vt.timeStr,
+        virtualDate: vt.dateStr,
+        virtualTimestamp: vt.ms,
         timestamp: Date.now(),
         amount: parseFloat(amountVal).toFixed(2),
         note: noteVal,
@@ -10449,7 +10725,7 @@ function confirmSendRelativeCard() {
 
     chat.messages.push(msg);
     chat.msg = `[亲属卡]`;
-    chat.time = timeStr;
+    chat.time = vt.timeStr;
     
     saveData();
     renderMessages(chat);
@@ -11662,17 +11938,18 @@ async function toggleVideoCamera() {
     currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
     
     // 给个轻震动反馈
-    if(navigator.vibrate) navigator.vibrate(50);
+    if(navigator.vibrate) {
+        try { navigator.vibrate(50); } catch(err) {}
+    }
     
     // 重新启动摄像头
     await enableUserCamera();
 }
 
+// 找到 hangUpVideoCall 内部时间戳逻辑替换为：
 function hangUpVideoCall() {
-    // 停止计时
     if (vcvTimerInterval) clearInterval(vcvTimerInterval);
 
-    // 停止摄像头流
     if (videoStream) {
         videoStream.getTracks().forEach(track => track.stop());
         videoStream = null;
@@ -11680,7 +11957,6 @@ function hangUpVideoCall() {
     
     document.getElementById('video-call-overlay').classList.remove('active');
     
-    // 结算时长并写入聊天记录
     if (activeVideoChatId) {
         const chat = chatList.find(c => c.id === activeVideoChatId);
         if (chat) {
@@ -11688,13 +11964,15 @@ function hangUpVideoCall() {
             const seconds = vcvSeconds % 60;
             const durationText = `${minutes}分${seconds}秒`;
             
-            const now = new Date();
-            const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            // ★ 核心重构：获取虚拟时间快照
+            const vt = window.getVirtualTimeData(chat, true);
             
             chat.messages.push({
                 text: `[视频通话] 时长 ${durationText}`, 
                 isSelf: true,
-                time: timeStr,
+                time: vt.timeStr,
+                virtualDate: vt.dateStr,
+                virtualTimestamp: vt.ms,
                 timestamp: Date.now(),
                 type: 'call_summary'
             });
@@ -11799,7 +12077,7 @@ async function generateVideoReply(chat, userText) {
     const recentChat = getCleanChatContext(chat, 15);
     const wbContext = typeof getWorldBookContext === 'function' ? getWorldBookContext(chat, userText) : "";
 
-    const systemPrompt = `
+    let systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
 ${PROMPT_LIB.antiStereotype}
@@ -11879,7 +12157,7 @@ async function triggerVideoFirstMessage(chat) {
     const recentChat = getCleanChatContext(chat, 20);
     const wbContext = typeof getWorldBookContext === 'function' ? getWorldBookContext(chat, recentChat) : "";
 
-    const systemPrompt = `
+    let systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
 ${PROMPT_LIB.antiStereotype}
@@ -12196,7 +12474,9 @@ function showFriendRequestModal(chat, contentText) {
     document.getElementById('fr-reply-input').value = '';
     
     document.getElementById('friend-request-overlay').classList.add('show');
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    if (navigator.vibrate) {
+        try { navigator.vibrate([200, 100, 200]); } catch(err) {}
+    }
 }
 
 // 5. 点击“同意” (带解黑后的追问机制)
@@ -12364,9 +12644,11 @@ function closeSecurityQuiz() {
 
 // 3. 调用 AI 出题 (解决思考模型 Token 被掐断问题)
 async function generateNewQuiz(chat) {
-    const apiKey = document.getElementById('apiKey').value;
-    const endpoint = document.getElementById('apiEndpoint').value;
-    const model = document.getElementById('apiModel').value;
+    // 使用中央路由分流
+    const apiConfig = window.getApiCredentials('quiz');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
 
     const recentChat = typeof getCleanChatContext === 'function' ? getCleanChatContext(chat, 15) : "";
     const wbContext = typeof getWorldBookContext === 'function' ? getWorldBookContext(chat, recentChat) : "";
@@ -14333,6 +14615,7 @@ async function uploadToGithub(isAuto = false) {
 }
 
 // 6. 从 GitHub 恢复 (全量下载并合并)
+// 6. 从 GitHub 恢复 (全量下载并合并)
 async function downloadFromGithub() {
     saveGithubConfig();
     const { ghToken, ghUser, ghRepo, ghFilename } = globalData;
@@ -14353,7 +14636,7 @@ async function downloadFromGithub() {
         const getRes = await fetch(url, {
             headers: {
                 'Authorization': `token ${ghToken}`,
-                'Accept': 'application/vnd.github.v3+json'
+                'Accept': 'application/vnd.github.v3.raw'
             }
         });
 
@@ -14362,12 +14645,8 @@ async function downloadFromGithub() {
             throw new Error(`获取失败: ${getRes.statusText}`);
         }
 
-        const data = await getRes.json();
-        
-        // Github API 获取大文件内容需要特殊处理去除换行符
-        const rawBase64 = data.content.replace(/\n/g, ''); 
-        const jsonString = base64ToUtf8(rawBase64);
-        const parsedData = JSON.parse(jsonString);
+        // 直接获取原始 JSON 对象
+        const parsedData = await getRes.json();
 
         // ==== 复用本地导入核心逻辑 ====
         await db.transaction('rw', db.globalSettings, db.chats, db.apiConfig, db.playlist, db.userMasks, async () => { 
@@ -14627,3 +14906,410 @@ window.toggleLoopMode = function() {
         btn.classList.remove('single-loop'); 
     }
 };
+
+// =========================================================================
+// ★★★ AI 心情/互动驱动型朋友圈决策器 (完全脱离后台定时循环) ★★★
+// =========================================================================
+
+/**
+ * 当您发布朋友圈时，通知所有被允许的 AI 角色排队过来浏览和评论
+ */
+async function triggerAllAiCommentsOnUserPost(moment) {
+    const allowedIds = globalData.autoAllowedCharIds || [];
+    
+    chatList.forEach(chat => {
+        if (!allowedIds.includes(chat.id)) return;
+        
+        // 模拟真人们错峰刷朋友圈，设定一个 5 秒到 30 秒之间的随机打字和思考延迟
+        const delay = 5000 + Math.random() * 25000; 
+        
+        setTimeout(() => {
+            evaluateSingleAiCommentOnUserPost(chat, moment).catch(e => console.error(e));
+        }, delay);
+    });
+}
+
+async function evaluateSingleAiCommentOnUserPost(chat, moment) {
+    // 使用中央路由分流 (分类归入论坛/动态模块)
+    const apiConfig = window.getApiCredentials('forum');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
+    if (!apiKey) return;
+
+    // 确保该动态依然存在，且自己没评论过
+    const targetMoment = momentList.find(m => m.id === moment.id);
+    if (!targetMoment) return;
+    const hasCommented = targetMoment.comments && targetMoment.comments.some(c => c.name === chat.name);
+    if (hasCommented) return;
+
+    const recentChat = chat.messages.slice(-10).map(m => {
+        const sender = m.isSelf ? "用户" : chat.name;
+        return `${sender}: ${m.text.replace(/<[^>]+>/g, '[媒体内容]')}`;
+    }).join('\n');
+
+    const systemPrompt = `
+你现在是 "${chat.name}"。你刚刚刷朋友圈，看到了用户最新发表的动态。
+根据你对用户的感情、最近私聊的氛围，决定是否在下方写下一条符合你个性的评论。
+
+=== 你的角色及详细设定 ===
+${getFullPersona(chat)}
+
+=== 你们最近的私聊记录 ===
+${recentChat}
+
+=== 用户新发布的动态内容 ===
+"${moment.content}"
+
+=== 决策规范 ===
+请认真斟酌，你并不需要每次都评论。如果你觉得没有适合插话的内容，可以保持安静。
+你必须且只能返回标准的 JSON 对象：
+- 如果要评论: { "action": "COMMENT", "content": "你的评论内容 (要求简短口语，5-30字，具有个人情绪特色，千万不要生硬)" }
+- 如果决定略过: { "action": "NONE" }
+`;
+
+    try {
+        const response = await fetch(`${endpoint}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: "user", content: systemPrompt }],
+                temperature: 0.8,
+                max_tokens: 1024
+            })
+        });
+
+        const data = await response.json();
+        let resultRaw = data.choices[0].message.content;
+        resultRaw = resultRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonStart = resultRaw.indexOf('{');
+        const jsonEnd = resultRaw.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) resultRaw = resultRaw.substring(jsonStart, jsonEnd + 1);
+
+        const result = JSON.parse(resultRaw);
+
+        if (result.action === 'COMMENT' && result.content) {
+            if (!targetMoment.comments) targetMoment.comments = [];
+            targetMoment.comments.push({ name: chat.name, content: result.content });
+            
+            chat.lastMomentTime = Date.now();
+            await db.chats.put(chat);
+            
+            saveMomentsToDB();
+            renderMomentFeed();
+            
+            if (typeof showNotification === 'function') {
+                showNotification(chat, `评论了你的动态: ${result.content}`);
+            }
+            console.log(`[朋友圈多角色留言] ${chat.name} 评论成功`);
+        }
+    } catch (e) {
+        console.error("[多角色留言] 评估错误:", e);
+    }
+}
+
+/**
+ * 在聊天结束后，触发当前聊天对象的心情评估，并顺便带动列表里“其他角色”在这个时间点自发分享生活动态 (模拟朋友圈活跃线)
+ */
+async function evaluateSpontaneousMomentsAfterChat(activeChat) {
+    const allowedIds = globalData.autoAllowedCharIds || [];
+    
+    // 1. 让刚刚聊完天的这个角色决定要不要发动态/评论
+    await evaluateAiMoodSocialAction(activeChat);
+
+    // 2. 顺便模拟“别人也在过生活”，让其他允许的角色也有一定概率（例如 15%）在此时自发更新动态，营造社交圈活跃感
+    const otherChats = chatList.filter(c => c.id !== activeChat.id && allowedIds.includes(c.id));
+    if (otherChats.length > 0) {
+        otherChats.forEach(chat => {
+            if (Math.random() < 0.15) { 
+                const delay = 5000 + Math.random() * 20000; // 5-25秒后自发动态
+                setTimeout(() => {
+                    triggerSpontaneousPost(chat).catch(e => console.error(e));
+                }, delay);
+            }
+        });
+    }
+}
+
+async function evaluateAiMoodSocialAction(chat) {
+    const now = Date.now();
+    const cooldown = 30 * 60 * 1000; 
+    if (chat.lastMomentTime && (now - chat.lastMomentTime < cooldown)) return;
+
+    // 使用中央路由分流 (分类归入论坛/动态模块)
+    const apiConfig = window.getApiCredentials('forum');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
+    if (!apiKey) return;
+
+    const recentChat = chat.messages.slice(-10).map(m => {
+        const sender = m.isSelf ? "用户" : chat.name;
+        return `${sender}: ${m.text.replace(/<[^>]+>/g, '[媒体内容]')}`;
+    }).join('\n');
+
+    const myMoments = momentList.filter(m => m.userId === 'me').slice(0, 1);
+    let userLatestMomentStr = "无最近动态";
+    let userLatestMomentId = null;
+    if (myMoments.length > 0) {
+        const m = myMoments[0];
+        const alreadyCommented = m.comments && m.comments.some(c => c.name === chat.name);
+        if (!alreadyCommented) {
+            userLatestMomentStr = `"${m.content}"`;
+            userLatestMomentId = m.id;
+        }
+    }
+
+    const systemPrompt = `
+你现在是 "${chat.name}"。你刚刚与用户结束了一次对谈。
+根据你对用户的感情、刚才聊天的氛围和余温，思考你此时内心的涟漪和心情，并做出一个自发的社交决策。
+
+=== 你的角色及详细设定 ===
+${getFullPersona(chat)}
+
+=== 刚刚完成的对话记录 ===
+${recentChat}
+
+=== 用户最近的朋友圈 ===
+${userLatestMomentStr}
+
+=== 行为选择 (三选一) ===
+1. POST: 你感触颇深、或者想在公共空间里记录当前的私密心情，决定发布一条只属于你的纯文本动态。(字数控制在 10-60 字，口语且生活化，切记作诗、矫情、带 # 标签)。
+2. COMMENT: 你看到了用户的朋友圈，深受触动，决定根据刚才聊天的默契，在下方写一句评论。 (只有在用户朋友圈不是"无最近动态"时可选)。
+3. NONE: 你不打算发布任何公开动态或评论，选择保持沉默。
+
+【格式规范】：你必须且只能返回标准的 JSON 对象：
+- 发布动态: { "action": "POST", "content": "动态文字内容" }
+- 评论用户: { "action": "COMMENT", "targetId": ${userLatestMomentId || 'null'}, "content": "评论内容" }
+- 保持沉默: { "action": "NONE" }
+`;
+
+    try {
+        const response = await fetch(`${endpoint}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: "user", content: systemPrompt }],
+                temperature: 0.85,
+                max_tokens: 1024
+            })
+        });
+
+        const data = await response.json();
+        let resultRaw = data.choices[0].message.content;
+        resultRaw = resultRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonStart = resultRaw.indexOf('{');
+        const jsonEnd = resultRaw.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) resultRaw = resultRaw.substring(jsonStart, jsonEnd + 1);
+
+        const result = JSON.parse(resultRaw);
+
+        if (result.action === 'POST' && result.content) {
+            const aiHandle = `@${chat.name}`; 
+            const newMoment = {
+                id: Date.now(),
+                userId: chat.id,
+                userName: chat.name,
+                userAvatar: chat.avatar,
+                handle: aiHandle,
+                time: '刚刚',
+                content: result.content,
+                images: [],
+                likes: 0, isLiked: false, comments: []
+            };
+            momentList.unshift(newMoment);
+            chat.lastMomentTime = Date.now();
+            await db.chats.put(chat);
+            
+            saveMomentsToDB();
+            renderMomentFeed();
+            console.log(`[情绪发圈] ${chat.name}: ${result.content}`);
+            if (typeof showNotification === 'function') showNotification(chat, `发布了新动态: ${result.content}`);
+        } 
+        else if (result.action === 'COMMENT' && result.content && result.targetId) {
+            const targetMoment = momentList.find(m => m.id == result.targetId);
+            if (targetMoment) {
+                if (!targetMoment.comments) targetMoment.comments = [];
+                targetMoment.comments.push({ name: chat.name, content: result.content });
+                chat.lastMomentTime = Date.now();
+                await db.chats.put(chat);
+                
+                saveMomentsToDB();
+                renderMomentFeed();
+                if (typeof showNotification === 'function') showNotification(chat, `评论了你的动态: ${result.content}`);
+                console.log(`[情绪评论] ${chat.name}: ${result.content}`);
+            }
+        }
+    } catch (e) {
+        console.warn("[心情动态] 本次未触发表达:", e);
+    }
+}
+
+async function triggerAiCommentReply(chat, moment, userCommentText) {
+    // 使用中央路由分流 (分类归入论坛/动态模块)
+    const apiConfig = window.getApiCredentials('forum');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
+    if (!apiKey) return;
+
+    let myName = "我";
+    const nameEl = document.getElementById('momentUserName');
+    if (nameEl) myName = nameEl.innerText;
+
+    const commentsHistory = (moment.comments || []).map(c => `${c.name}: ${c.content}`).join('\n');
+
+    // 智能分析当前的语境，帮助 AI 精准理解
+    let contextDescription = "";
+    if (moment.userId === 'me') {
+        contextDescription = `用户 ("${myName}") 刚刚在Ta自己的朋友圈下，指名道姓【回复】了你留下的评论。你们正在Ta的动态下面聊天。`;
+    } else {
+        contextDescription = `用户 ("${myName}") 刚刚在【你发的朋友圈】下面直接给你留了言（内容是: "${userCommentText}"）。你作为动态的原作者，现在需要回复Ta的直接留言。`;
+    }
+
+    const systemPrompt = `
+你现在是 "${chat.name}"。
+${contextDescription}
+请在评论区回复Ta。展现出真实朋友之间在社交网络下互动闲聊的灵动感。
+
+=== 你的性格人设 ===
+${getFullPersona(chat)}
+
+=== 当前朋友圈的内容 ===
+作者: ${moment.userName}
+内容: "${moment.content}"
+
+=== 评论区所有对话/留言历史 ===
+${commentsHistory}
+
+=== 用户对你说的最后一句话 ===
+"${userCommentText}"
+
+=== 规则说明 ===
+1. 语言必须极其简短、口语化、接地气，像真人在朋友圈里随意的斗嘴、吐槽或闲聊 (通常 5-30 字，不要带任何引号和表情代码)。
+2. 你必须且只能返回标准的 JSON 对象，绝不能带有 Markdown 格式：
+   - 决定回复: { "action": "REPLY", "content": "你的回复内容" }
+   - 结束对话不回复: { "action": "NONE" }
+`;
+
+    try {
+        const response = await fetch(`${endpoint}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: "user", content: systemPrompt }],
+                temperature: 0.8,
+                max_tokens: 1024
+            })
+        });
+
+        const data = await response.json();
+        let resultRaw = data.choices[0].message.content;
+        resultRaw = resultRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonStart = resultRaw.indexOf('{');
+        const jsonEnd = resultRaw.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) resultRaw = resultRaw.substring(jsonStart, jsonEnd + 1);
+
+        const result = JSON.parse(resultRaw);
+
+        if (result.action === 'REPLY' && result.content) {
+            const targetMoment = momentList.find(m => m.id === moment.id);
+            if (targetMoment) {
+                if (!targetMoment.comments) targetMoment.comments = [];
+                // 写入盖楼
+                targetMoment.comments.push({
+                    name: chat.name,
+                    content: `回复 ${myName}：${result.content}`
+                });
+                
+                saveMomentsToDB();
+                renderMomentFeed();
+                
+                if (typeof showNotification === 'function') {
+                    showNotification(chat, `在朋友圈回复了你: ${result.content}`);
+                }
+                console.log(`[评论区] ${chat.name} 回复了你: ${result.content}`);
+            }
+        }
+    } catch (e) {
+        console.error("[评论区] 回复生成失败:", e);
+    }
+}
+
+async function triggerSpontaneousPost(chat) {
+    // 使用中央路由分流 (分类归入论坛/动态模块)
+    const apiConfig = window.getApiCredentials('forum');
+    const endpoint = apiConfig.endpoint;
+    const apiKey = apiConfig.key;
+    const model = apiConfig.model;
+    if (!apiKey) return;
+
+    const vt = window.getVirtualTimeData ? window.getVirtualTimeData(chat, false) : { timeStr: "12:00" };
+
+    const systemPrompt = `
+你现在是 "${chat.name}"。你正在过着你自己的虚拟一天，你当前的当地时间是：${vt.timeStr}。
+结合你此时的作息阶段（早晨/下午/深夜等）、你的个性和最近的心境，自发地决定是否想要发一条朋友圈分享一下你现在的微小动态或突然的想法。
+
+=== 你的详细设定 ===
+${getFullPersona(chat)}
+
+=== 决策规范 ===
+请认真斟酌。不要无病呻吟，只有在真的有细节可以分享时再发圈。
+你必须且只能返回标准的 JSON 对象：
+- 如果要发朋友圈: { "action": "POST", "content": "动态内容" }
+- 如果不发: { "action": "NONE" }
+`;
+
+    try {
+        const response = await fetch(`${endpoint}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: "user", content: systemPrompt }],
+                temperature: 0.9,
+                max_tokens: 1024
+            })
+        });
+
+        const data = await response.json();
+        let resultRaw = data.choices[0].message.content;
+        resultRaw = resultRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonStart = resultRaw.indexOf('{');
+        const jsonEnd = resultRaw.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) resultRaw = resultRaw.substring(jsonStart, jsonEnd + 1);
+
+        const result = JSON.parse(resultRaw);
+
+        if (result.action === 'POST' && result.content) {
+            const aiHandle = `@${chat.name}`; 
+            const newMoment = {
+                id: Date.now(),
+                userId: chat.id,
+                userName: chat.name,
+                userAvatar: chat.avatar,
+                handle: aiHandle,
+                time: '刚刚',
+                content: result.content,
+                images: [],
+                likes: 0, isLiked: false, comments: []
+            };
+            momentList.unshift(newMoment);
+            chat.lastMomentTime = Date.now();
+            await db.chats.put(chat);
+            
+            saveMomentsToDB();
+            renderMomentFeed();
+            console.log(`[自发动态] ${chat.name}: ${result.content}`);
+            if (typeof showNotification === 'function') {
+                showNotification(chat, `发布了新动态: ${result.content}`);
+            }
+        }
+    } catch (e) {
+        console.warn("[自发动态] 本次未触发发帖:", e);
+    }
+}
+

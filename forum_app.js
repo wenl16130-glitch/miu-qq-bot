@@ -71,60 +71,208 @@ async function initForumApp() {
   console.log("[论坛] 初始化完成");
 }
 
-// ★★★ 新增：超级头像查找函数 (修复头像不显示 & 修复 characters 报错) ★★★
-function findBestAvatar(name, fallbackAvatar) {
-  if (!name) return getDefaultAvatarDataUrl();
-  const cleanName = name.trim();
+// ==================== [核心重构] 身份与评论关系严格解析器 ====================
 
-  // 获取全局角色列表，如果没加载则为空数组
-  const globalChars = window.characters || []; 
+// 1. 严格身份解析器：杜绝模糊包含，仅限完全等值匹配
+function resolveAuthorIdentity(rawName) {
+  const name = (rawName || "").trim();
+  const cleanName = name.toLowerCase();
+  const globalChars = typeof characters !== 'undefined' ? characters : (window.characters || []);
+  const aiParticipants = forumSettings.aiParticipants || [];
+  const npcs = forumSettings.npcs || [];
 
-  // 1. 先去 AI角色列表里找 (包含名字包含匹配)
-  if (forumSettings.aiParticipants) {
-    for (const p of forumSettings.aiParticipants) {
-      // 尝试匹配昵称
-      if (p.nickname && (p.nickname === cleanName || cleanName.includes(p.nickname))) {
-        if (p.avatar) return p.avatar;
+  // 先匹配 AI 角色
+  const matchedAI = aiParticipants.find(p => {
+    const char = globalChars.find(ch => String(ch.id) === String(p.charId));
+    const pName = (p.nickname || char?.name || '').trim().toLowerCase();
+    return pName && cleanName === pName;
+  });
+
+  if (matchedAI) {
+    const char = globalChars.find(c => String(c.id) === String(matchedAI.charId));
+    return {
+      type: "ai",
+      id: matchedAI.charId,
+      name: matchedAI.nickname || char?.name || name,
+      avatar: matchedAI.avatar || char?.avatar || ''
+    };
+  }
+
+  // 再匹配 NPC
+  const matchedNPC = npcs.find(n => n.name && cleanName === n.name.trim().toLowerCase());
+  if (matchedNPC) {
+    return {
+      type: "npc",
+      id: matchedNPC.id,
+      name: matchedNPC.name,
+      avatar: matchedNPC.avatar || ''
+    };
+  }
+
+  // 兜底为普通路人
+  return {
+    type: "npc",
+    id: null,
+    name: name,
+    avatar: ""
+  };
+}
+
+// 2. 闭环关系连线器：两阶段无冲突 ID 分配与引用查找 (带 AI 评论硬限防护)
+function mapAndResolveComments(newComments, post) {
+  if (!Array.isArray(newComments)) return [];
+  
+  const postComments = post.comments || [];
+  const baseId = postComments.reduce((max, com) => Math.max(max, Number(com.id) || 0), 0);
+  const myName = (forumSettings.userNickname || "用户").trim().toLowerCase();
+
+  // 记录当前批次中每个 AI 角色的评论计数
+  const aiCommentCounts = {};
+
+  // Phase 1: 安全生成独立物理 ID 并精准匹配发布人
+  const mapped = newComments
+    .filter(c => {
+      // 严格过滤掉代指用户的生成
+      const cName = (c.authorName || "").trim().toLowerCase();
+      return c.authorType !== 'user' && cName !== 'user' && cName !== myName;
+    })
+    .map((c, idx) => {
+      const auth = resolveAuthorIdentity(c.authorName);
+      return {
+        auth: auth,
+        originalComment: c,
+        idx: idx // 记录在 AI 原始数组中的索引，确保过滤后 tempIdx 对应关系不断联
+      };
+    })
+    .filter(item => {
+      // ★★★ 核心修复：防刷屏过滤器。单次生成中，每个 AI 角色最多只允许保留 2 条评论 ★★★
+      if (item.auth.type === 'ai') {
+        const aiName = item.auth.name;
+        aiCommentCounts[aiName] = (aiCommentCounts[aiName] || 0) + 1;
+        
+        if (aiCommentCounts[aiName] > 2) {
+          console.log(`[论坛安全防护] 过滤掉 AI 角色 [${aiName}] 的第 ${aiCommentCounts[aiName]} 条多余评论，避免评论区刷屏。`);
+          return false; // 抛弃该条多余评论
+        }
       }
+      return true;
+    })
+    .map((item, idx) => {
+      const c = item.originalComment;
+      const auth = item.auth;
+      return {
+        id: baseId + idx + 1,
+        tempIdx: item.idx + 1, // 映射到原始数组序号，供 Phase 2 引用关系查找
+        authorType: auth.type,
+        authorId: auth.id,
+        authorName: auth.name,
+        authorAvatar: auth.avatar,
+        handle: c.handle || generateEnglishHandle(auth.name),
+        content: c.content || "",
+        likes: c.likes || 0,
+        liked: false,
+        timestamp: Date.now() + idx * 1000,
+        _aiReplyTo: c.replyTo || null,
+        _aiReplyToName: (c.replyToName || "").trim()
+      };
+    });
+
+  // Phase 2: 安全闭环关系链连接
+  mapped.forEach(c => {
+    let resolvedId = null;
+    let resolvedName = null;
+
+    if (c._aiReplyTo || c._aiReplyToName) {
+      let parent = null;
       
-      // 尝试匹配原始角色名
-      // 【修复点】：这里原代码是 characters.find，改为 globalChars.find
-      const char = globalChars.find(c => String(c.id) === String(p.charId));
-      if (char) {
-        if (char.name === cleanName || cleanName.includes(char.name)) {
-           // 优先用论坛设置的头像，没有则用角色原头像
-           return p.avatar || char.avatar || getDefaultAvatarDataUrl();
+      // A. 优先检索“当前批次”中生成的相邻评论（防断联）
+      if (c._aiReplyToName) {
+        parent = mapped.find(other => 
+          other.authorName.toLowerCase() === c._aiReplyToName.toLowerCase() && 
+          other.id !== c.id
+        );
+      }
+      if (!parent && c._aiReplyTo) {
+        const idxVal = Number(c._aiReplyTo);
+        parent = mapped.find(other => 
+          other.tempIdx === idxVal && 
+          other.id !== c.id
+        );
+      }
+
+      if (parent) {
+        resolvedId = parent.id;
+        resolvedName = parent.authorName;
+      } else {
+        // B. 次优先检索数据库中“历史已有”的评论
+        let oldParent = null;
+        if (c._aiReplyToName) {
+          oldParent = postComments.find(old => 
+            old.authorName.toLowerCase() === c._aiReplyToName.toLowerCase()
+          );
+        }
+        if (oldParent) {
+          resolvedId = oldParent.id;
+          resolvedName = oldParent.authorName;
         }
       }
     }
-  }
 
-  // 2. 去 NPC 列表里找
-  if (forumSettings.npcs) {
-    for (const npc of forumSettings.npcs) {
-      if (npc.name === cleanName || cleanName.includes(npc.name)) {
-        if (npc.avatar) return npc.avatar;
-      }
+    c.replyTo = resolvedId;
+    c.replyToName = resolvedName;
+
+    // 清洗掉过程临时属性，绝不污染最终存储的数据
+    delete c.tempIdx;
+    delete c._aiReplyTo;
+    delete c._aiReplyToName;
+  });
+
+  return mapped;
+}
+
+// ★★★ 新增：超级头像查找函数 (修复头像不显示 & 修复 characters 报错) ★★★
+function findBestAvatar(name, fallbackAvatar) {
+  if (!name) return getDefaultAvatarDataUrl();
+  const cleanName = name.trim().toLowerCase();
+  const globalChars = typeof characters !== 'undefined' ? characters : (window.characters || []); 
+
+  // 1. 精确匹配 AI 参与者
+  const aiParticipants = forumSettings.aiParticipants || [];
+  for (const p of aiParticipants) {
+    if (p.nickname && p.nickname.trim().toLowerCase() === cleanName) {
+      if (p.avatar) return p.avatar;
+    }
+    const char = globalChars.find(c => String(c.id) === String(p.charId));
+    if (char && char.name && char.name.trim().toLowerCase() === cleanName) {
+       return p.avatar || char.avatar || getDefaultAvatarDataUrl();
     }
   }
 
-  // 3. 如果是“我”
-  if (cleanName === forumSettings.userNickname || cleanName === '我' || cleanName === '用户') {
+  // 2. 精确匹配 NPC 列表
+  const npcs = forumSettings.npcs || [];
+  for (const npc of npcs) {
+    if (npc.name && npc.name.trim().toLowerCase() === cleanName) {
+      if (npc.avatar) return npc.avatar;
+    }
+  }
+
+  // 3. 匹配“我”
+  const myName = (forumSettings.userNickname || '').trim().toLowerCase();
+  if (cleanName === myName || cleanName === '我' || cleanName === '用户') {
       return localStorage.getItem("avatarImg") || getDefaultAvatarDataUrl();
   }
 
-  // 4. 如果都没找到，但帖子数据里自带了头像，就用自带的
+  // 4. 自带 Base64 回退
   if (fallbackAvatar && fallbackAvatar.length > 50) {
     return fallbackAvatar;
   }
 
-  // 5. 实在找不到，尝试去全局角色列表里最后捞一次
-  const fallbackChar = globalChars.find(c => c.name === cleanName);
+  // 5. 全局角色池兜底捞
+  const fallbackChar = globalChars.find(c => c.name && c.name.trim().toLowerCase() === cleanName);
   if (fallbackChar && fallbackChar.avatar) {
       return fallbackChar.avatar;
   }
 
-  // 6. 返回默认灰图
   return getDefaultAvatarDataUrl();
 }
 
@@ -536,12 +684,10 @@ function renderForumPostDetail() {
          replyPrefix = `<span style="color:#536471;">回复 </span><span style="color:#1d9bf0; font-weight:bold;">@${escapeForumHtml(comment.replyToName)}</span><span style="color:#536471;">：</span>`;
       }
 
-      // 如果内容里傻傻地包含了 "回复 @xxx"，把它清洗掉，避免重复
+      // 【强化清洗】如果内容开头有“回复@某某：”或“回复某某：”，无论中英文，一律强行清洗，避免与系统前缀重复
       let cleanContent = formatForumContent(comment.content);
-      if (comment.replyToName) {
-         const dumbPattern = new RegExp(`^回复\\s*@?${comment.replyToName}[:：\\s]*`, 'i');
-         cleanContent = cleanContent.replace(dumbPattern, '');
-      }
+      const manualReplyPattern = /^回复\s*@?[a-zA-Z0-9_\u4e00-\u9fa5]+[:：\s]*/i;
+      cleanContent = cleanContent.replace(manualReplyPattern, '');
 
       return `
       <div class="forum-comment" data-comment-id="${comment.id}">
@@ -2201,14 +2347,13 @@ async function submitForumPost() {
   generateInteractionsForNewPost(newPost.id);
 }
 
-// 生成新帖子的互动数据 (完整修复版：保留所有Prompt细节 + 强制身份绑定)
+// 生成新帖子的互动数据 (防单一 AI 角色刷屏 + 强制丰富随机 NPC 比例版)
 async function generateInteractionsForNewPost(postId) {
   const post = forumPosts.find((p) => p.id === postId);
   if (!post) return;
 
   const apiConfig = getActiveApiConfig();
   if (!apiConfig || !apiConfig.url || !apiConfig.key) {
-    // 没配置API时的兜底逻辑
     post.views = Math.floor(Math.random() * 500) + 50;
     post.likes = Math.floor(Math.random() * 30) + 5;
     post.retweets = Math.floor(Math.random() * 10);
@@ -2226,7 +2371,6 @@ async function generateInteractionsForNewPost(postId) {
         name: p.nickname || settings.charName || char?.name || "角色",
         handle: p.handle || generateEnglishHandle(p.nickname || char?.name || ''),
         identity: p.identity || "",
-        // 这里尽可能获取详细的性格描述
         persona: settings.persona || char?.persona || getCharacterFullPersona(p),
       };
     });
@@ -2239,7 +2383,7 @@ async function generateInteractionsForNewPost(postId) {
       persona: npc.persona || "",
     }));
 
-    // 3. 收集人物关系 (这很重要，不能省)
+    // 3. 收集人物关系
     const relationships = (forumSettings.relationships || []).map(rel => {
       const person1 = getForumPersonName(rel.person1Type, rel.person1Id);
       const person2 = getForumPersonName(rel.person2Type, rel.person2Id);
@@ -2260,7 +2404,7 @@ async function generateInteractionsForNewPost(postId) {
     }
 
     // ============================================================
-    // ★★★ 完整 Prompt 构建 (绝不简化) ★★★
+    // ★★★ 核心重构：Prompt 重组，永久注入“随机路人”机制 ★★★
     // ============================================================
     let systemPrompt = `你是一个论坛互动生成器。请根据以下设定为帖子生成评论和互动数据。
 
@@ -2273,33 +2417,27 @@ ${forumSettings.worldview}
 
 【帖子内容】${post.content}${imageDesc}${retweetInfo}
 
-【AI角色】可以使用这些角色评论 (请符合人设)
+【AI角色】（在评论区中属于少数，仅发表 1~2 条高含金量回复，必须严格符合人设）
 ${participants.length > 0 
   ? participants.map((p, i) => 
       `${i + 1}. ${p.name}（@${p.handle}）：${p.identity || '未设置身份'}${p.persona ? '，性格/人设：' + p.persona.substring(0, 100) : ''}`
     ).join("\n")
   : "无"}`;
 
+    // 无论后台有没有添加固定 NPC，都融合“随机匿名网友”，保证路人数量充沛
+    systemPrompt += `\n\n【论坛网民群体（必需，用于活跃气氛）】`;
     if (npcs.length > 0) {
-      systemPrompt += `
-
-【固定NPC】可以使用这些NPC评论
-${npcs.map((n, i) => 
-  `${i + 1}. ${n.name}（@${n.handle}）：${n.identity || '普通网友'}`
-).join("\n")}`;
+      systemPrompt += `\n1. 【已注册的固定NPC（优先使用）】:\n${npcs.map((n, i) => `  - ${n.name}（@${n.handle}）：${n.identity || '普通网友'}`).join("\n")}`;
     }
+    systemPrompt += `\n2. 【随机匿名路人网友（必需，大量生成）】:\n请你自由发挥，扮演 8-15 个各种不同网名、不同背景和说话风格的普通路人网友（例如：“酸汤肥牛”、“夜航船”、“别整天做梦了”、“椰椰椰椰子”、“咸鱼突刺”等逼真且生活化的网名，禁止直接提取示例），参与回帖讨论。`;
 
     if (relationships.length > 0) {
-      systemPrompt += `
-
-【人物关系】评论时体现这些关系
-${relationships.join("\n")}`;
+      systemPrompt += `\n\n【人物关系】评论时体现这些关系\n${relationships.join("\n")}`;
     }
 
     const messages = [{ role: "system", content: systemPrompt }];
     let userContent = [];
     
-    // 如果有图，把图传给 AI
     if (post.images && post.images.length > 0) {
       post.images.forEach(imgData => {
         userContent.push({
@@ -2317,27 +2455,36 @@ ${relationships.join("\n")}`;
   "likes": 点赞数(范围10-200),
   "retweets": 转发数(范围0-50),
   "comments": [
-    {"authorType":"ai或npc","authorName":"昵称","handle":"英文用户名","content":"评论内容","likes":点赞数0-20}
+    {
+      "authorType": "ai或npc",
+      "authorName": "昵称",
+      "handle": "英文用户名",
+      "content": "评论内容",
+      "likes": 点赞数0-20,
+      "replyTo": null或被回复评论在当前数组中的tempIdx(从1开始的序号),
+      "replyToName": null或被回复者的【中文昵称】
+    }
   ]
 }
-
 要求：
 1. 根据用户的身份地位合理生成互动数据（身份越高，互动越多）
 2. 如果帖子有图片，评论者应该能看到并评论图片内容
 3. 请生成 10-20 条评论，让互动看起来热闹一些
-4. authorType只能是"ai"或"npc"
-5. 评论要自然、符合世界观和角色性格
-6. AI角色和NPC的昵称要与设定一致
+4. **评论区人员结构（极其重要）：**
+   - **必须有 70% 以上的评论来自“固定NPC”或“随机匿名网友”**，展现出公共论坛该有的热闹围观、闲聊、吃瓜等百家争鸣生态。
+   - AI 角色（如“时屿”）在整篇评论区中是“稀缺嘉宾”，他们最多只能发表 1~2 条独立评论。绝对不许出现满篇都是 AI 角色在单机自言自语刷屏的情况。
+5. authorType只能是"ai"或"npc"。如果是 "npc"，优先使用已注册的固定NPC，不足的配额必须全部用自由创造的随机匿名网友填满。
+6. 评论要自然、符合世界观和角色性格
 7. 禁止使用[爱心][笑哭][开心]等方括号表情格式，必须直接使用emoji如❤️😂😊等
 8. 如果是转发帖，评论应该针对原帖内容或用户的转发评论
-9. 【重要逻辑校验】：
-   - 如果评论内容是针对楼主帖子的（例如发表看法、回答楼主问题），replyTo 字段必须为 null。
-   - 只有当评论是明确回应楼层中某人的话（如“回复@某某：你说得对”），才设置 replyTo ID。`
+9. 【回复格式与规范】：
+   - 评论内容（content字段）必须纯净！**绝对不要**在 content 中包含“回复@xxx：”或“回复 xxx”等前缀。
+   - 如果有回复关系，请使用 \`replyTo\` 设为对方在数组中的序号（从1开始），并将 \`replyToName\` 设为对方的**【中文昵称】**（绝对不要写英文handle）。
+   - **绝对不要**让任何评论回复用户（楼主/我），因为用户在此贴下还没有发表过评论。`
     });
 
     messages.push({ role: "user", content: userContent });
 
-    // 发送请求
     const response = await fetch(`${apiConfig.url}/chat/completions`, {
       method: "POST",
       headers: {
@@ -2357,12 +2504,7 @@ ${relationships.join("\n")}`;
     const data = await response.json();
     let content = data.choices[0]?.message?.content || "";
 
-    // 清洗 JSON
-    content = content
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
-    
+    content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
     if (jsonMatch) {
@@ -2371,61 +2513,10 @@ ${relationships.join("\n")}`;
       post.views = result.views || Math.floor(Math.random() * 500) + 50;
       post.likes = result.likes || Math.floor(Math.random() * 30) + 5;
       post.retweets = result.retweets || Math.floor(Math.random() * 10);
-      
-      // 获取用户昵称，用于过滤
-      const myName = forumSettings.userNickname || "用户";
 
       if (result.comments && Array.isArray(result.comments)) {
-        result.comments.forEach((c, idx) => {
-          
-          if (c.authorType === "user") return;
-          if (c.authorName === myName) return;
-
-          // ============================================================
-          // ★★★ 核心修复：强制身份绑定 (消灭高仿) ★★★
-          // ============================================================
-          let finalType = "npc";
-          let finalName = (c.authorName || "网友").trim();
-          let finalAvatar = "";
-          
-          // 1. 匹配 AI 角色
-          let matchedAI = forumSettings.aiParticipants.find(p => {
-            const char = characters.find(ch => String(ch.id) === String(p.charId));
-            const pName = (p.nickname || char?.name || '').trim();
-            return pName && (finalName === pName || finalName.includes(pName) || pName.includes(finalName));
-          });
-
-          if (matchedAI) {
-            const char = characters.find(ch => String(ch.id) === String(matchedAI.charId));
-            finalType = "ai";
-            finalName = matchedAI.nickname || char?.name || finalName;
-            finalAvatar = matchedAI.avatar || char?.avatar || '';
-          } 
-          // 2. 匹配 NPC
-          else if (forumSettings.npcs) {
-            let matchedNPC = forumSettings.npcs.find(n => n.name && (finalName === n.name || finalName.includes(n.name)));
-            if (matchedNPC) {
-               finalType = "npc";
-               finalName = matchedNPC.name;
-               finalAvatar = matchedNPC.avatar || '';
-            }
-          }
-          // ============================================================
-          
-          post.comments.push({
-            id: idx + 1,
-            authorType: finalType, 
-            authorName: finalName,
-            authorAvatar: finalAvatar,
-            handle: c.handle || generateEnglishHandle(finalName),
-            content: c.content || "",
-            replyTo: c.replyTo || null,
-            replyToName: c.replyToName || null,
-            timestamp: Date.now() + idx * 1000,
-            likes: c.likes || Math.floor(Math.random() * 10),
-            liked: false,
-          });
-        });
+        const resolved = mapAndResolveComments(result.comments, post);
+        post.comments = [...(post.comments || []), ...resolved];
       }
 
       await localforage.setItem("forumPosts", forumPosts);
@@ -2689,11 +2780,17 @@ ${forumSettings.forumName}
 - 身份：${forumSettings.userIdentity || "普通成员"}
 `;
 
-    // ★★★ 动态注入指令：如果是关注页，禁止生成路人 ★★★
+    // ★★★ 动态注入指令：区分 关注页 和 推荐页(广场) 的发帖人比例 ★★★
     if (isFollowingTab) {
         systemPrompt += `\n【重要指令】当前用户正在查看“关注列表”。
 请**仅生成**以下列出的【AI角色】或【固定NPC】发布的帖子。
-**绝对不要**生成陌生路人或未列出角色的帖子。
+**绝对不要**生成任何陌生路人或未列出角色的帖子。
+`;
+    } else {
+        systemPrompt += `\n【重要指令】当前用户正在查看“广场推荐页”。
+为了模拟一个真实、热闹的公共社区：
+1. **发帖比例约束**：本次生成的 8-10 条帖子中，**必须有 70% 以上的帖子来自【随机路人网友】或【固定NPC】**（即模拟生动、逼真的论坛生态，不要让同一个角色霸屏）。
+2. **AI角色发帖限额**：在单次生成的帖子中，**每个特定的 AI 角色（如“时屿”）最多只能发布 1 条独立帖子**。绝对禁止同一个 AI 角色发布多条帖子，他们属于论坛中的“稀缺嘉宾”。
 `;
     }
 
@@ -2708,6 +2805,12 @@ ${participants.length > 0
       systemPrompt += `\n\n【固定NPC】\n${npcs.map((n, i) => `${i + 1}. ${n.name}（@${n.handle}）`).join("\n")}`;
     }
 
+    // ★★★ 推荐页注入随机发帖网民描述，大模型可由此作为素材发帖 ★★★
+    if (!isFollowingTab) {
+      systemPrompt += `\n\n【随机路人网友（无需固定，供发帖自由发挥）】
+请扮演 10 个以上不同的、具有各种网络生活气息昵称的普通网友（例如：“酸汤肥牛”、“夜航船”、“别整天做梦了”、“椰椰椰椰子”、“咸鱼突刺”等，禁止直接提取昵称），让他们用不同的口吻发布吐槽、分享、求助等日常帖子。`;
+    }
+
     if (relationships.length > 0) {
       systemPrompt += `\n\n【人物关系】\n${relationships.join("\n")}`;
     }
@@ -2719,12 +2822,19 @@ ${participants.length > 0
 2. 帖子内容(content)中如果包含双引号 "，必须转义为 \\" 。建议在内容中尽量使用单引号 ' 代替双引号。
 3. 确保JSON结构完整，不要被截断。
 4. **关键要求：每条帖子必须包含 4 到 8 条精彩评论！让评论区看起来热闹一点！**
+5. **回复格式规范（极其重要）：**
+   - 评论内容（content字段）必须纯净！**绝对不要**在 content 中包含“回复@xxx：”或“回复 xxx”等前缀。
+   - 如果有回复关系，请使用 \`replyToName\` 字段记录被回复者的**【中文昵称】**（绝对不要写英文handle，例如写“小明”而不是“tiny_time381”）。
+   - 绝对不要生成任何回复用户（楼主/我）的评论，因为用户还没有在该贴发表过任何评论。
+6. **发帖作者分配（推荐页核心）：**
+   - 如果是在推荐页（广场），生成的帖子中，AI角色发帖的数量**不得超过2个**（且不能是同一个AI角色）。
+   - 剩下的 6-8 个帖子必须全部分配给【固定NPC】或【随机路人网友】（分配给随机路人时，"authorType" 设为 "npc"，"authorName" 设为随机路人昵称，"handle" 设为英文用户名）。
 
 格式模板：
 [
   {
-    "authorType": "ai", // 或 "npc"，绝对不要生成 "user"
-    "authorName": "角色名",
+    "authorType": "ai", // 或 "npc"（固定NPC或随机路人均使用 "npc"），绝对不要生成 "user"
+    "authorName": "角色名或路人昵称",
     "handle": "Handle名",
     "content": "内容中尽量用单引号。",
     "likes": 12,
@@ -2735,7 +2845,17 @@ ${participants.length > 0
         "authorType": "npc",
         "authorName": "路人A",
         "content": "评论内容",
-        "likes": 2
+        "likes": 2,
+        "replyTo": null,
+        "replyToName": null
+      },
+      {
+        "authorType": "ai",
+        "authorName": "角色名",
+        "content": "回复另一条评论的内容（不含任何回复前缀）",
+        "likes": 1,
+        "replyTo": 1, // 指向被回复的评论在当前comments数组中的序号(从1开始)
+        "replyToName": "路人A" // 被回复者的【中文昵称】
       }
     ]
   }
@@ -2824,73 +2944,36 @@ ${participants.length > 0
 
     // 3. 数据处理与合并 (保留用户帖子逻辑)
     const newPosts = posts
-    .filter(p => {
-        // 防止 AI 生成你的帖子
-        if (p.authorType === 'user') return false;
-        if (p.authorName === myName) return false;
-        return true;
-    })
-    .map((p, idx) => {
-        let authorAvatar = "";
-        const authorName = p.authorName || "匿名";
-        let authorId = null; // ★ 尝试获取ID
-        
-        // 尝试匹配 AI 角色
-        for (const participant of forumSettings.aiParticipants) {
-          const char = characters.find(c => String(c.id) === String(participant.charId));
-          const participantName = participant.nickname || char?.name || '';
-          if (participantName && authorName.includes(participantName)) {
-            authorAvatar = participant.avatar || char?.avatar || '';
-            authorId = participant.charId; // ★ 绑定 ID
-            break;
-          }
-        }
-        
-        // 尝试匹配 NPC
-        if (!authorAvatar && forumSettings.npcs) {
-          for (const npc of forumSettings.npcs) {
-            if (npc.name && authorName.includes(npc.name)) {
-              authorAvatar = npc.avatar || '';
-              authorId = npc.id; // ★ 绑定 ID
-              break;
-            }
-          }
-        }
-        
-        return {
-          id: Math.floor(Date.now() + idx * 1000 + Math.random() * 100),
-          authorType: "npc", // 强制标记为npc (UI会自动识别名字并关联)
-          authorId: authorId, // ★ 写入 ID
-          authorName: authorName,
-          authorAvatar: authorAvatar,
-          handle: p.handle || generateEnglishHandle(p.authorName),
-          content: p.content || "",
-          timestamp: Date.now() - Math.random() * 7200000,
-          likes: p.likes || Math.floor(Math.random() * 50),
-          liked: false,
-          retweets: p.retweets || Math.floor(Math.random() * 30),
-          views: p.views || Math.floor(Math.random() * 4900) + 100,
-          isRetweet: p.isRetweet || false,
-          originalPost: p.originalPost || null,
-          comments: (p.comments || [])
-          .filter(c => {
-             // 防止 AI 生成你的评论
-             return c.authorType !== 'user' && c.authorName !== myName;
-          })
-          .map((c, cidx) => {
-             return {
-              id: cidx + 1,
-              authorType: "npc",
-              authorName: c.authorName || "网友",
-              authorAvatar: "", 
-              content: c.content || "",
-              likes: c.likes || 0,
-              replyTo: null,
-              timestamp: Date.now() - Math.random() * 3600000 
-             };
-          }),
-        };
-    });
+            .filter(p => {
+                if (p.authorType === 'user') return false;
+                if (p.authorName === myName) return false;
+                return true;
+            })
+            .map((p, idx) => {
+                const auth = resolveAuthorIdentity(p.authorName);
+                
+                const tempPost = {
+                  id: Math.floor(Date.now() + idx * 1000 + Math.random() * 100),
+                  authorType: auth.type,
+                  authorId: auth.id,
+                  authorName: auth.name,
+                  authorAvatar: auth.avatar,
+                  handle: p.handle || generateEnglishHandle(auth.name),
+                  content: p.content || "",
+                  timestamp: Date.now() - Math.random() * 7200000,
+                  likes: p.likes || Math.floor(Math.random() * 50),
+                  liked: false,
+                  retweets: p.retweets || Math.floor(Math.random() * 30),
+                  views: p.views || Math.floor(Math.random() * 4900) + 100,
+                  isRetweet: p.isRetweet || false,
+                  originalPost: p.originalPost || null,
+                  comments: []
+                };
+
+                // 通过清洗器建立严格的物理关联，不发生自生自复
+                tempPost.comments = mapAndResolveComments(p.comments, tempPost);
+                return tempPost;
+            });
 
     // 保留用户自己的帖子
     const keepPosts = forumPosts.filter(p => p.authorType === 'user' || p.isPinned);
@@ -3036,6 +3119,7 @@ ${replier ? `请你扮演「${replier.name}」回复这条评论。\n角色人�
   }
 }
 
+// 生成更多评论 (同样加入强制路人 NPC 比例约束)
 async function generateMoreComments(targetPostId = null) {
   const pid = targetPostId || currentForumPostId;
   if (!pid) return;
@@ -3067,7 +3151,6 @@ async function generateMoreComments(targetPostId = null) {
   const participantsInfo = forumSettings.aiParticipants.map((p) => {
     const char = characters.find((c) => String(c.id) === String(p.charId));
     const charName = p.nickname || char?.name || "角色";
-    // 获取完整人设，包括性格、说话方式等
     let rawPersona = getCharacterFullPersona(p);
     if (rawPersona) {
       const myNameForReplace = forumSettings.userNickname || "用户";
@@ -3086,7 +3169,6 @@ async function generateMoreComments(targetPostId = null) {
   const worldbookContent = getForumWorldbookContent(contextText);
 
   try {
-    // 处理转发贴引用
     let retweetInfo = "";
     if (post.isRetweet && post.originalPost) {
       const orig = post.originalPost;
@@ -3104,20 +3186,24 @@ ${existingComments.map(c => `[ID:${c.id}] ${c.author}：${c.content}`).join("\n"
 
 【用户信息】昵称：${forumSettings.userNickname || "用户"}
 
-【AI角色（必须符合人设）】
+【AI角色】（在评论区中属于少数，必须符合人设）
 ${participantsInfo.length > 0 ? participantsInfo.map((p, i) => `${i + 1}. ${p.name}\n人设：${p.fullPersona}`).join('\n\n') : "无"}
 
 【固定NPC可用】
 ${npcsInfo || "无"}
 
+【随机匿名网民（必需，用于活跃气氛）】
+请自由发挥，扮演各种不同网名、不同背景和说话风格的普通网友（如：“酸汤肥牛”、“椰椰椰椰子”、“別整天做梦了”、“落叶知秋”等有趣逼真的昵称，禁止直接提取示例）。
+
 请生成5-10条新评论，严格遵守以下要求：
-1. **角色扮演**：AI角色的评论必须符合其人设、语气和性格特点！
-2. **禁止扮演用户**：绝对不要生成用户的评论。
-3. **回复格式**：如果要回复某人，请把被回复者的名字写在 \`replyToName\` 字段里，而**不要**写在 content 内容里（不要写“回复xx：”）。
-4. **内容纯净**：\`content\` 字段里只写他说的话。
-5. **格式要求**：返回纯JSON数组格式。
-6. **表情**：禁止使用 [表情] 格式，必须用 emoji。
-7. **标点**：如果内容包含引号，请使用单引号。
+1. **评论区人员比例（极其重要）**：**必须有 70% 以上的新评论来自随机匿名网民或固定 NPC**，以模拟真实公共社区。AI 角色在整篇评论区中属于少数派，他们最多只能发表 1 条独立评论，绝不能连续刷屏。
+2. **角色扮演**：AI角色的评论必须符合其人设、语气 and 性格特点！
+3. **禁止扮演用户**：绝对不要生成用户的评论。
+4. **回复格式**：如果要回复某人，请把被回复者的【中文昵称】写在 \`replyToName\` 字段里，而**不要**写在 content 内容里（千万不要写英文handle，如：写“小明”而不是“tiny_time381”，不要写“回复xx：”）。绝对不要回复用户（楼主），因为用户没有在当前的“已有评论”中发表过评论。
+5. **内容纯净**：\`content\` 字段里只写他说的话。
+6. **格式要求**：返回纯JSON数组格式。
+7. **表情**：禁止使用 [表情] 格式，必须用 emoji。
+8. **标点**：如果内容包含引号，请使用单引号。
 
 JSON格式模板：
 [
@@ -3125,7 +3211,6 @@ JSON格式模板：
   {"authorType":"ai","authorName":"角色名","content":"这里的content不要包含'回复xx'","replyToName":"被回复者昵称"}
 ]`;
 
-    // 发送请求
     const response = await fetch(`${apiConfig.url}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiConfig.key}` },
@@ -3141,20 +3226,17 @@ JSON格式模板：
 
     const data = await response.json();
 
-    // 拦截无结果
     if (!data.choices || data.choices.length === 0) {
         throw new Error("生成失败：API返回无效数据。");
     }
 
     let content = data.choices[0]?.message?.content || "";
-    // 清洗 Markdown
     content = content.replace(/```json|```/g, "").trim();
 
     let newComments = [];
     try {
         newComments = JSON.parse(content);
     } catch(e) {
-        // 暴力修复：尝试提取数组部分
         const match = content.match(/\[[\s\S]*\]/);
         if (match) {
             try { newComments = JSON.parse(match[0]); } catch(e2) {}
@@ -3162,67 +3244,8 @@ JSON格式模板：
     }
 
     if (newComments.length > 0) {
-      const maxId = post.comments.reduce((max, c) => Math.max(max, c.id || 0), 0);
-      let addedCount = 0;
-      
-      newComments.forEach((c, idx) => {
-        // 过滤掉用户自己
-        if (c.authorType === "user" || c.authorName === myName) return; 
-
-        // ============================================================
-        // ★★★ 核心修复：强制身份绑定 (消灭高仿) ★★★
-        // ============================================================
-        let finalType = c.authorType || "npc";
-        let finalName = c.authorName;
-        let finalAvatar = "";
-        
-        // 1. 优先匹配 AI 角色 (模糊匹配)
-        let matchedAI = forumSettings.aiParticipants.find(p => {
-            const char = characters.find(ch => String(ch.id) === String(p.charId));
-            const pName = (p.nickname || char?.name || '').trim();
-            // 只要名字包含，或者被包含，就认为是同一个 AI
-            return pName && (finalName.includes(pName) || pName.includes(finalName));
-        });
-
-        if (matchedAI) {
-             const char = characters.find(ch => String(ch.id) === String(matchedAI.charId));
-             finalType = 'ai';
-             finalName = matchedAI.nickname || char?.name || finalName; // 强制统一昵称
-             finalAvatar = matchedAI.avatar || char?.avatar || '';
-        } else {
-            // 2. 匹配固定 NPC
-            if (forumSettings.npcs) {
-                const matchedNPC = forumSettings.npcs.find(n => n.name && finalName.includes(n.name));
-                if (matchedNPC) {
-                    finalType = 'npc';
-                    finalName = matchedNPC.name;
-                    finalAvatar = matchedNPC.avatar || '';
-                }
-            }
-        }
-        // ============================================================
-
-        // 查找 replyTo ID
-        let replyId = null;
-        if (c.replyToName) {
-            const target = post.comments.find(old => old.authorName === c.replyToName);
-            if (target) replyId = target.id;
-        }
-
-        post.comments.push({
-          id: maxId + idx + 1,
-          authorType: finalType, 
-          authorName: finalName,
-          authorAvatar: finalAvatar,
-          content: c.content || "",
-          replyTo: replyId,      
-          replyToName: c.replyToName || null,
-          timestamp: Date.now() + idx * 1000, 
-          likes: Math.floor(Math.random() * 5),
-          liked: false,
-        });
-        addedCount++;
-      });
+      const resolved = mapAndResolveComments(newComments, post);
+      post.comments = [...(post.comments || []), ...resolved];
 
       await localforage.setItem("forumPosts", forumPosts);
 
@@ -3231,7 +3254,7 @@ JSON格式模板：
       } else {
         renderForumFeed();
       }
-      if(addedCount > 0) showToast(`新增 ${addedCount} 条评论`);
+      if (resolved.length > 0) showToast(`新增 ${resolved.length} 条评论`);
     }
   } catch (e) {
     console.error("[论坛] 生成评论失败:", e);
@@ -4396,8 +4419,26 @@ ${relationships.join("\n")}`;
     "retweets": 转发数(0-50),
     "views": 浏览量(100-5000),
     "comments": [
-      {"id":1,"authorType":"npc","authorName":"昵称","handle":"英文用户名","content":"评论","likes":0},
-      {"id":2,"authorType":"ai","authorName":"昵称","handle":"英文用户名","content":"回复评论","likes":0,"replyTo":1,"replyToName":"被回复者昵称"}
+      {
+        "tempIdx": 1,
+        "authorType": "npc",
+        "authorName": "昵称",
+        "handle": "英文用户名",
+        "content": "纯净评论内容（不要写回复@xxx前缀）",
+        "likes": 0,
+        "replyTo": null,
+        "replyToName": null
+      },
+      {
+        "tempIdx": 2,
+        "authorType": "ai",
+        "authorName": "昵称",
+        "handle": "英文用户名",
+        "content": "纯净回复内容（绝对不要在content中写回复@xxx前缀）",
+        "likes": 0,
+        "replyTo": 1, // 指向被回复的评论的tempIdx
+        "replyToName": "被回复者的【中文昵称】" // 必须是中文昵称，绝不能写英文handle
+      }
     ]
   }
 ]
@@ -4405,7 +4446,8 @@ ${relationships.join("\n")}`;
 1. 所有帖子都必须与「${topic}」话题相关！
 2. authorType只能是"ai"或"npc"，不要生成"user"
 3. 每个帖子必须有10-15条评论！
-4. 禁止使用[表情]格式，用emoji❤️😂代替`;
+4. 禁止使用[表情]格式，用emoji❤️😂代替
+5. **回复格式规范（极其重要）：** 评论的 \`content\` 中**绝对不能**包含“回复@xxx”或“回复 xxx”等前缀。被回复者的【中文昵称】必须写在 \`replyToName\` 字段里（千万不要写英文handle）。绝对不要生成任何回复用户（楼主）的评论。`;
 
     // 4. 调用 API
     const response = await fetch(`${apiConfig.url}/chat/completions`, {
@@ -4490,34 +4532,15 @@ ${relationships.join("\n")}`;
 
     // 6. 后续逻辑保持不变...
     const searchPosts = posts.map((p, idx) => {
-        let authorAvatar = "";
-        const authorName = p.authorName || "匿名";
+        const auth = resolveAuthorIdentity(p.authorName);
         
-        for (const participant of forumSettings.aiParticipants) {
-          const char = characters.find(c => String(c.id) === String(participant.charId));
-          const participantName = participant.nickname || char?.name || '';
-          if (participantName && authorName.includes(participantName)) {
-            authorAvatar = participant.avatar || char?.avatar || '';
-            break;
-          }
-        }
-        
-        if (!authorAvatar && forumSettings.npcs) {
-          for (const npc of forumSettings.npcs) {
-            if (npc.name && authorName.includes(npc.name)) {
-              authorAvatar = npc.avatar || '';
-              break;
-            }
-          }
-        }
-        
-        return {
+        const tempPost = {
           id: Math.floor(Date.now() + idx * 1000 + Math.random() * 100),
-          authorType: p.authorType === "user" ? "npc" : p.authorType || "npc",
-          authorId: null,
-          authorName: authorName,
-          authorAvatar: authorAvatar,
-          handle: p.handle || generateEnglishHandle(p.authorName),
+          authorType: auth.type,
+          authorId: auth.id,
+          authorName: auth.name,
+          authorAvatar: auth.avatar,
+          handle: p.handle || generateEnglishHandle(auth.name),
           content: p.content || "",
           timestamp: Date.now() - Math.random() * 7200000,
           likes: p.likes || Math.floor(Math.random() * 50),
@@ -4526,42 +4549,12 @@ ${relationships.join("\n")}`;
           views: p.views || Math.floor(Math.random() * 4900) + 100,
           isSearchResult: true,
           searchTopic: topic,
-          comments: (p.comments || []).map((c, cidx) => {
-            let commentAvatar = "";
-            const commentName = c.authorName || "网友";
-            
-            for (const participant of forumSettings.aiParticipants) {
-              const char = characters.find(ch => String(ch.id) === String(participant.charId));
-              const participantName = participant.nickname || char?.name || '';
-              if (participantName && commentName.includes(participantName)) {
-                commentAvatar = participant.avatar || char?.avatar || '';
-                break;
-              }
-            }
-            if (!commentAvatar && forumSettings.npcs) {
-              for (const npc of forumSettings.npcs) {
-                if (npc.name && commentName.includes(npc.name)) {
-                  commentAvatar = npc.avatar || '';
-                  break;
-                }
-              }
-            }
-            
-            return {
-              id: c.id || cidx + 1,
-              authorType: c.authorType === "user" ? "npc" : c.authorType || "npc",
-              authorName: commentName,
-              authorAvatar: commentAvatar,
-              content: c.content || "",
-              replyTo: c.replyTo || null,
-              replyToName: c.replyToName || null,
-              timestamp: Date.now() - Math.random() * 3600000,
-              likes: c.likes || Math.floor(Math.random() * 10),
-              liked: false,
-            };
-          }),
+          comments: []
         };
-      });
+
+        tempPost.comments = mapAndResolveComments(p.comments, tempPost);
+        return tempPost;
+    });
 
     forumPosts = forumPosts.filter(p => !(p.isSearchResult && p.searchTopic === topic));
     forumPosts = [...searchPosts, ...forumPosts];
@@ -4915,13 +4908,14 @@ async function openOtherUserProfile(authorType, authorName, authorId) {
     char = characters.find(c => String(c.id) === String(authorId));
   }
   
-  // 1b. 如果找不到，用名字模糊查找 (修复"AI偷懒"的关键)
+  // 1b. 如果找不到，用名字精确查找
   if (!participant && !char) {
      participant = forumSettings.aiParticipants.find(p => {
-         const nick = (p.nickname || '').trim();
+         const nick = (p.nickname || '').trim().toLowerCase();
          const c = characters.find(ch => String(ch.id) === String(p.charId));
-         const cName = (c?.name || '').trim();
-         return (nick && targetName.includes(nick)) || (cName && targetName.includes(cName));
+         const cName = (c?.name || '').trim().toLowerCase();
+         const searchName = targetName.toLowerCase();
+         return (nick && searchName === nick) || (cName && searchName === cName);
      });
      
      if (participant) {
@@ -6065,7 +6059,7 @@ function formatJoinDate(timestamp) {
   return `${year}年${month}月`;
 }
 
-// 更换头像
+// 更换头像 (已修复 QuotaExceededError 限制)
 function changeProfileAvatar() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -6075,7 +6069,13 @@ function changeProfileAvatar() {
     if (file) {
       const reader = new FileReader();
       reader.onload = async (ev) => {
-        localStorage.setItem("avatarImg", ev.target.result);
+        // 核心修复：引入安全压缩和写入机制
+        const savedAvatar = await saveGlobalAvatar(ev.target.result);
+        
+        // 同步到论坛设置并保存
+        forumSettings.userAvatar = savedAvatar;
+        await localforage.setItem("forumSettings", forumSettings);
+        
         renderForumProfile();
         showToast('头像已更新');
       };
@@ -6260,20 +6260,15 @@ async function saveProfileChanges() {
   const following = parseFollowCount(followingStr);
   const followers = parseFollowCount(followersStr);
   
-  // ★★★ 核心修复开始 ★★★
-  // 原来的逻辑因为判断了 length > 100 和 svg 检查，导致很多正常头像保存失败。
-  // 现在改为：只要预览图存在，并且不是那个灰色的默认占位图（根据实际情况判断），就保存。
-  
-  if (avatarPreview) {
-    // 1. 保存到论坛专用设置
-    forumSettings.userAvatar = avatarPreview; 
-    
-    // 2. 同步到全局设置 (保证聊天界面也是这个头像)
-    localStorage.setItem("avatarImg", avatarPreview); 
-    
-    console.log("[论坛] 头像已强制保存，长度:", avatarPreview.length);
-  }
-  // ★★★ 核心修复结束 ★★★
+ if (avatarPreview) {
+        // 核心修复：压缩并安全写入全局头像 (防 QuotaExceededError)
+        const savedAvatar = await saveGlobalAvatar(avatarPreview);
+        
+        // 1. 保存到论坛专用设置
+        forumSettings.userAvatar = savedAvatar; 
+        
+        console.log("[论坛] 全局头像已安全保存并完成轻量化压缩");
+      }
   
   forumSettings.userNickname = name;
   forumSettings.userHandle = handle;
@@ -6340,6 +6335,10 @@ function formatFollowCount(num) {
 }
 
 // ==================== 导出 ====================
+
+// 新增安全头像函数导出
+window.compressAvatar = compressAvatar;
+window.saveGlobalAvatar = saveGlobalAvatar;
 
 window.initForumApp = initForumApp;
 window.renderForumPage = renderForumPage;
@@ -6468,38 +6467,32 @@ if (document.readyState === "loading") {
   initForumApp();
 }
 
-// ==================== 修复补丁开始 ====================
-
-// 获取当前激活的 API 配置
+// 获取当前激活的 API 配置（已集成中央调度分流）
 function getActiveApiConfig() {
-  // 1. 尝试从 DOM 输入框获取 (script.js 会把设置加载到这些 ID 中)
+  // 1. 优先直接调用主程序的中央分流路由器，传入 'forum' 标识
+  if (typeof window.getApiCredentials === 'function') {
+    const apiConfig = window.getApiCredentials('forum');
+    return {
+      url: apiConfig.endpoint,
+      key: apiConfig.key,
+      model: apiConfig.model || 'gpt-3.5-turbo'
+    };
+  }
+
+  // 2. 备用兜底（防止主程序 getApiCredentials 未加载时的异常）
   const urlEl = document.getElementById('apiEndpoint');
   const keyEl = document.getElementById('apiKey');
   const modelEl = document.getElementById('apiModel');
 
   if (urlEl && keyEl) {
     let url = urlEl.value.trim();
-    // 确保 URL 不以 / 结尾，防止拼接错误
     if (url.endsWith('/')) {
       url = url.slice(0, -1);
     }
-    
     return {
       url: url,
       key: keyEl.value.trim(),
       model: modelEl ? modelEl.value.trim() : 'gpt-3.5-turbo'
-    };
-  }
-
-  // 2. 如果 DOM 获取失败，尝试从全局 globalData 获取 (备用方案)
-  if (typeof globalData !== 'undefined') {
-    let url = globalData.apiEndpoint || "";
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    
-    return {
-      url: url,
-      key: globalData.apiKey || "",
-      model: globalData.apiModel || "gpt-3.5-turbo"
     };
   }
 
@@ -6788,3 +6781,80 @@ window.openForumPostFromCard = function(postId) {
         }
     }, 300);
 };
+
+// ==================== [新增] 安全头像压缩与写入机制 (防 QuotaExceededError) ====================
+
+/**
+ * 智能头像压缩器（限制最大 150x150，PNG 格式保留透明度，防黑底）
+ */
+function compressAvatar(base64Str, maxWidth = 150, maxHeight = 150) {
+  return new Promise((resolve) => {
+    // 安全守卫 1: 如果是网络路径、非 base64、或者是 SVG，直接返回不压缩，防止 CORS 跨域或 SVG 渲染报错
+    if (!base64Str || !base64Str.startsWith('data:') || base64Str.includes('image/svg+xml')) {
+      resolve(base64Str);
+      return;
+    }
+    
+    // 安全守卫 2: 如果图片本来就很小（小于 30KB），没必要压缩，避免不必要的性能损耗
+    if (base64Str.length < 30 * 1024) {
+      resolve(base64Str);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      
+      // 等比例缩放计算
+      if (width > maxWidth || height > maxHeight) {
+        if (width > height) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        } else {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.clearRect(0, 0, width, height); // 保持透明通道，防止 PNG 变黑底
+        ctx.drawImage(img, 0, 0, width, height);
+        // 使用 image/png 格式，在 150x150 的尺寸下通常只需 10~25KB 左右，且无损透明度
+        const compressedData = canvas.toDataURL('image/png');
+        resolve(compressedData);
+      } else {
+        resolve(base64Str);
+      }
+    };
+    img.onerror = () => {
+      resolve(base64Str); // 加载失败时保底返回原图，不影响流程
+    };
+    img.src = base64Str;
+  });
+}
+
+/**
+ * 安全保存全局头像至 localStorage
+ */
+async function saveGlobalAvatar(avatarData) {
+  try {
+    // 压缩成超小体积
+    const compressed = await compressAvatar(avatarData, 150, 150);
+    localStorage.setItem("avatarImg", compressed);
+    return compressed;
+  } catch (e) {
+    console.error("[论坛] 保存全局头像失败:", e);
+    // 存储空间彻底全满的优雅降级处理
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      showToast("浏览器本地存储空间已满，头像未成功同步，请清理浏览器缓存");
+    }
+    return avatarData;
+  }
+}
+

@@ -678,11 +678,13 @@
         const char = chatList.find(c => c.id === charId);
         if (!char) throw new Error("角色不存在");
 
-        const endpoint = document.getElementById('apiEndpoint').value;
-        const key = document.getElementById('apiKey').value;
-        const model = document.getElementById('apiModel').value;
-        
-        if (!key) throw new Error("请先在设置中配置 API Key");
+        // 使用主程序的中央分流路由器
+    const apiConfig = window.getApiCredentials('check_phone');
+    const endpoint = apiConfig.endpoint;
+    const key = apiConfig.key;
+    const model = apiConfig.model;
+    
+    if (!key) throw new Error("请先在副 API 配置中填写 Key 并勾选对应功能");
 
         // 1. 获取人设
         let persona = typeof getFullPersona === 'function' ? getFullPersona(char) : `角色：${char.name}\n设定：${char.charPersona}`;

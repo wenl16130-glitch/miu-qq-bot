@@ -3207,24 +3207,33 @@ textarea.wb-entry-input { height: 80px; resize: none; font-family: inherit; }
     background: #007aff; 
 }
 
+/* 1. 新建分类输入框整行容器 */
 .new-cat-row { 
     display: flex; 
     gap: 8px; 
     margin-top: 5px; 
     padding-top: 15px; 
     border-top: 1px solid #eee; 
+    width: 100%;                /* 确保整行容器占满弹窗可用宽度 */
+    box-sizing: border-box;
+    flex-shrink: 0 !important;   /* 防止高度上被压缩 */
 }
 
+/* 2. 新建分类输入框 */
 .new-cat-input { 
     flex: 1; 
+    min-width: 0 !important;    /* 核心修复：打破浏览器对 input 默认最小宽度的限制，使其能完美自动收缩 */
+    width: 100%;                /* 配合宽度自适应 */
     padding: 10px; 
     border-radius: 10px; 
     border: 1px solid #eee; 
     background: #f5f5f5; 
     outline: none; 
     font-size: 13px;
+    box-sizing: border-box;
 }
 
+/* 3. “新建”按钮 */
 .btn-create-cat { 
     background: #000; 
     color: #fff; 
@@ -3233,8 +3242,11 @@ textarea.wb-entry-input { height: 80px; resize: none; font-family: inherit; }
     font-size: 13px; 
     display: flex; 
     align-items: center; 
+    justify-content: center;
     cursor: pointer; 
     font-weight: 600;
+    flex-shrink: 0 !important;  /* 核心修复：防止按钮本身被挤压或缩水 */
+    white-space: nowrap;        /* 确保“新建”两个字永远在一行显示，不发生折行 */
 }
 
 .cat-popup-footer { 
