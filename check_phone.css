@@ -215,8 +215,10 @@
 
 /* 顶部标题栏 */
 .cp-app-header {
-    height: 70px;
-    padding-top: 25px;
+    /* 核心修复：增加 env(safe-area-inset-top) 适配刘海屏和状态栏 */
+    height: calc(70px + env(safe-area-inset-top, 0px)); 
+    padding-top: calc(25px + env(safe-area-inset-top, 0px)); 
+    
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -227,6 +229,7 @@
     z-index: 20;
     color: #000;
 }
+
 
 .cp-header-title { font-size: 17px; font-weight: 600; color: #000; }
 
