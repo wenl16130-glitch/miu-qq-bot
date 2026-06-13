@@ -36,28 +36,22 @@
     position: fixed;
     top: 0; left: 0;
     width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(10px);
+    background: #000; /* 全屏后后面不需要模糊了，直接用纯黑或白底 */
     z-index: 10000;
     display: none;
-    justify-content: center;
-    align-items: center;
     opacity: 0;
     transition: opacity 0.4s ease;
-    cursor: pointer;
 }
 #phone-system-overlay.active { opacity: 1; }
 
-/* 手机边框 */
+/* 手机边框 (改为全屏无边框) */
 .phone-bezel {
-    width: 360px;
-    height: 740px;
-    max-height: 92vh;
-    background: #f2f3f5; /* 海盐灰底色 */
-    border-radius: 40px;
-    box-shadow: 
-        0 0 0 8px #1a1a1a,
-        0 20px 50px rgba(0,0,0,0.4);
+    width: 100%;
+    height: 100%;
+    max-height: none; /* 移除原本的高度限制 */
+    background: #f2f3f5; 
+    border-radius: 0; /* 移除原本的圆角 */
+    box-shadow: none; /* 移除原本的边框阴影 */
     position: relative;
     overflow: hidden;
     display: flex;
@@ -65,6 +59,25 @@
     user-select: none;
     cursor: default;
 }
+
+/* ★★★ 新增：锁屏界面的退出按钮 ★★★ */
+.ls-exit-btn {
+    position: absolute;
+    top: max(20px, env(safe-area-inset-top)); /* 适配手机刘海屏 */
+    left: 20px;
+    width: 36px; height: 36px;
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    z-index: 10001;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transition: background 0.2s;
+}
+.ls-exit-btn:active { background: rgba(0, 0, 0, 0.5); }
 
 /* --- 3. 锁屏界面 (修复版：淡蓝背景 + 遮挡内部 + 修复壁纸) --- */
 .lock-screen-panel {
@@ -306,19 +319,53 @@
 .cp-card-time { font-size: 11px; color: #b2b2b2; }
 .cp-card-preview { font-size: 13px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* 备忘录/购物/抖音/搜索卡片 (保持圆角风格) */
-.cp-memo-card, .cp-shop-card, .cp-tiktok-card, .cp-search-card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 15px;
-    margin: 0 12px 12px 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
-    cursor: pointer;
+/* --- 备忘录 (时间轴日记风格) --- */
+#view-memo {
+    background-color: #ffffff; /* ★★★ 核心修复：强制备忘录页面为纯白底色 ★★★ */
 }
 
-.cp-memo-card { border-left: 4px solid #b3e5fc; } /* 海盐蓝 */
-.cp-memo-date { font-size: 11px; color: #aaa; font-weight: 600; text-transform: uppercase; }
-.cp-memo-text { font-size: 14px; color: #444; line-height: 1.4; margin-top: 4px; }
+#memoListContainer {
+    padding: 20px 15px; 
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+}
+
+.cp-memo-item {
+    margin-bottom: 30px; 
+    display: flex;
+    flex-direction: column;
+}
+
+/* 标题行 (带左侧粗竖线) */
+.cp-memo-header {
+    display: flex;
+    align-items: center; /* 居中对齐 */
+    margin-bottom: 10px;
+    padding-left: 12px;
+    border-left: 4px solid #d1d1d1; /* 左侧的灰色粗竖线 */
+}
+
+.cp-memo-title {
+    font-size: 18px; 
+    font-weight: 700; 
+    color: #333; 
+    letter-spacing: 0.5px;
+}
+
+/* 灰色内容框 (增加质感和分界线) */
+.cp-memo-box {
+    background-color: #f4f5f7; /* 质感浅灰底色，在白底下非常清晰 */
+    border: 1px solid #eeeeee; /* 增加极细的边缘分界线，提升立体感 */
+    border-radius: 12px;
+    padding: 16px 18px;
+    font-size: 15px; 
+    color: #333; 
+    line-height: 1.6; 
+    text-align: left; /* 强制左对齐，修复排版 */
+    word-wrap: break-word;
+}
+
 
 /* 购物卡片 - 增加呼吸感优化版 */
 .cp-shop-card { 
@@ -833,3 +880,44 @@ tiktok-detail-container {
     line-height: 1.6;
     text-align: justify;
 }
+
+/* =========================================
+   修复：浏览器/搜索历史卡片样式
+========================================= */
+#searchListContainer {
+    padding-top: 12px;
+}
+
+.cp-search-card { 
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 0 12px 12px 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.cp-search-card:active {
+    background: #f5f5f5;
+}
+
+.cp-search-left { 
+    display: flex; 
+    align-items: center; 
+    gap: 12px; 
+    flex: 1; 
+    overflow: hidden; 
+}
+
+.cp-search-text { 
+    font-size: 15px; 
+    color: #333; 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; /* 文字太长会自动变成省略号 */
+}
+

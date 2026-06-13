@@ -28,6 +28,10 @@
             <!-- A. 锁屏层 (极简+换壁纸) -->
             <!-- 点击这个区域(空白处)会触发 handleWallpaperClick 换壁纸 -->
             <div class="lock-screen-panel" id="phoneLockScreen" onclick="handleWallpaperClick(event)">
+
+            <div class="ls-exit-btn" onclick="window.exitPhoneSystem(); event.stopPropagation();">
+                    <i class="fas fa-times"></i>
+                </div>
                 
                 <!-- 纯净的时间日期 (无状态栏) -->
                 <div class="ls-clock-container">
@@ -160,7 +164,7 @@
 
     window.cp_wallpapers_cache = window.cp_wallpapers_cache || {};
 
-    window.enterPhoneSystem = function(charId) {
+        window.enterPhoneSystem = function(charId) {
         currentCheckCharId = charId;
         closeCheckPhoneSelector();
         
@@ -169,21 +173,35 @@
             document.getElementById('cpHeaderTitle').innerText = char.name + "的手机";
         }
         window.cp_data_cache = window.cp_data_cache || {};
+        window.cp_wallpapers_cache = window.cp_wallpapers_cache || {};
 
         // 1. 初始化变量
         isLocked = true;
         isGenerating = false;
         isDetailOpen = false;
-        if (window.cp_data_cache[charId]) {
-            g_phoneData = window.cp_data_cache[charId]; // 如果以前查过，就恢复数据
-            console.log("已恢复上次的手机数据");
+        
+        // ★★★ 修复 1：优先从本地数据库恢复数据 ★★★
+        if (char && char.checkPhoneData) {
+            g_phoneData = char.checkPhoneData;
+            window.cp_data_cache[charId] = g_phoneData; // 同步回内存
+            console.log("已从数据库恢复手机数据");
+        } else if (window.cp_data_cache[charId]) {
+            g_phoneData = window.cp_data_cache[charId]; 
         } else {
-            g_phoneData = null; // 这是一个新角色，还没有数据
+            g_phoneData = null; 
         }
+
         const lockScreen = document.getElementById('phoneLockScreen');
         const homeBg = document.getElementById('phoneScreenBg'); 
         
-        const savedWallpaper = window.cp_wallpapers_cache[charId];
+        // ★★★ 修复 2：优先从本地数据库恢复壁纸 ★★★
+        let savedWallpaper = null;
+        if (char && char.checkPhoneWallpaper) {
+            savedWallpaper = char.checkPhoneWallpaper;
+            window.cp_wallpapers_cache[charId] = savedWallpaper;
+        } else if (window.cp_wallpapers_cache[charId]) {
+            savedWallpaper = window.cp_wallpapers_cache[charId];
+        }
         
         if (savedWallpaper) {
             const styleString = `url(${savedWallpaper})`;
@@ -215,6 +233,7 @@
         overlay.style.display = 'flex';
         setTimeout(() => overlay.classList.add('active'), 10);
     };
+
 
     // 头部返回按钮逻辑
     window.handleHeaderBack = function() {
@@ -286,7 +305,7 @@
             </div>`;
         msgContainer.appendChild(pinnedGroup);
 
-        // --- 2. 渲染【其他联系人】 (AI 生成) ---
+                // --- 2. 渲染【其他联系人】 (AI 生成) ---
         if(data.messages && data.messages.length > 0) {
             const otherGroup = document.createElement('div');
             otherGroup.className = 'cp-list-group';
@@ -299,9 +318,17 @@
                 if (filterKeywords.some(k => item.name.includes(k))) return;
 
                 const ava = `https://placehold.co/100/e0e0e0/555?text=${item.name ? item.name[0] : 'U'}`;
-                const incomingMsg = item.incoming || item.msg || "查看消息";
-                // 优先显示 Char 的回复作为预览，显得更自然
-                const displayPreview = item.reply ? item.reply : incomingMsg;
+                
+                // ★★★ 兼容多回合聊天格式 ★★★
+                let displayPreview = "查看消息";
+                if (item.chatHistory && item.chatHistory.length > 0) {
+                    // 如果有历史记录，取最后一条作为列表页的预览
+                    displayPreview = item.chatHistory[item.chatHistory.length - 1].text;
+                } else {
+                    // 兼容以前旧的 incoming / reply 格式
+                    const incomingMsg = item.incoming || item.msg || "查看消息";
+                    displayPreview = item.reply ? item.reply : incomingMsg;
+                }
                 
                 otherGroup.innerHTML += `
                     <div class="cp-chat-card" onclick="window.openDetail('msg', ${index})">
@@ -318,19 +345,31 @@
             msgContainer.appendChild(otherGroup);
         }
 
-        // B. 备忘录
+                // B. 备忘录 (时间轴日记风格)
         const memoContainer = document.getElementById('memoListContainer');
         memoContainer.innerHTML = '';
         if(data.memos && data.memos.length) {
-            data.memos.forEach(item => {
-                const text = item.text.replace(/\n/g, '<br>');
+            data.memos.forEach((item) => {
+                // ★★★ 修复：清理 AI 生成的首行缩进空格，并替换换行符 ★★★
+                const cleanText = item.text.replace(/^[ \t]+/gm, ''); 
+                const textContent = cleanText.replace(/\n/g, '<br>');
+                const titleText = item.title || "记录";
+                
+                // 去掉了多余的 dateText 时间戳
                 memoContainer.innerHTML += `
-                    <div class="cp-memo-card">
-                        <div class="cp-memo-date">${item.date}</div>
-                        <div class="cp-memo-text">${text}</div>
+                    <div class="cp-memo-item">
+                        <div class="cp-memo-header">
+                            <span class="cp-memo-title">${titleText}</span>
+                        </div>
+                        <div class="cp-memo-box">
+                            ${textContent}
+                        </div>
                     </div>`;
             });
-        } else { memoContainer.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px;">暂无备忘录</div>'; }
+        } else { 
+            memoContainer.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px;">暂无备忘录</div>'; 
+        }
+
 
         // C. 购物
         const shopContainer = document.getElementById('shopListContainer');
@@ -380,8 +419,7 @@
         } else { searchContainer.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px;">搜索记录为空</div>'; }
     }
 
-    // --- 5. 详情页逻辑 ---
-    window.openDetail = function(type, index) {
+        window.openDetail = function(type, index) {
         const view = document.getElementById('cpDetailView');
         const content = document.getElementById('cpDetailContent');
         const detailTitle = document.getElementById('cpDetailTitle');
@@ -398,6 +436,11 @@
             detailTitle.innerText = msgData.name;
             renderSimulatedChatDetail(content, msgData);
             view.style.background = '#F2F3F5';
+        } else if (type === 'memo') {
+            const memoData = g_phoneData.memos[index];
+            detailTitle.innerText = "备忘录";
+            renderMemoDetail(content, memoData);
+            view.style.background = '#fff';
         } else if (type === 'tiktok') {
             const ttData = g_phoneData.tiktok[index];
             detailTitle.innerText = "视频详情";
@@ -424,156 +467,76 @@
         }, 300);
     };
 
-    // --- 渲染详情子函数 ---
-    // --- 补回丢失的函数：论坛详情渲染 ---
-    function renderSearchDetail(container, data) {
-        // 1. 获取楼主信息
-        let charName = "匿名用户";
-        let charAvatar = "https://placehold.co/100";
-        if (currentCheckCharId && typeof chatList !== 'undefined') {
-            const charObj = chatList.find(c => c.id === currentCheckCharId);
-            if (charObj) {
-                charName = charObj.name;
-                charAvatar = charObj.avatar;
-            }
-        }
-
-        const postTitle = data.text || "无标题";
-        const postBody = data.forumBody || data.text; 
-        const replies = data.forumReplies || [];
-
-        let repliesHtml = '';
-        if (replies.length > 0) {
-            replies.forEach((rep, idx) => {
-                // 判断是否是楼主
-                const repName = rep.name || "";
-                const isLZ = (
-                    repName === charName || 
-                    repName === '楼主' || 
-                    repName.includes(charName)
-                );
-                
-                // 楼主标签
-                const badgeHtml = isLZ ? `<span class="fc-lz-badge" style="margin-left:6px;">楼主</span>` : '';
-                const floorNum = idx + 1;
-
-                // 清洗内容
-                let displayText = rep.text;
-                displayText = displayText.replace(/@[\w\u4e00-\u9fa5]+\s?[:：]?/g, ''); 
-                displayText = displayText.replace(/(回复\d+楼[:：]?)/g, '<span style="color:#999;font-size:0.9em;margin-right:4px;">$1</span>');
-                displayText = displayText.replace(/^(回复[:：])/g, '<span style="color:#999;font-size:0.9em;margin-right:4px;">$1</span>');
-
-                repliesHtml += `
-                <div class="forum-comment-item">
-                    <div class="fc-meta-row">
-                        <span class="fc-floor-label">${floorNum}楼</span>
-                        ${badgeHtml}
-                    </div>
-                    <div class="fc-content" style="margin-top:4px;">${displayText}</div>
-                </div>`;
-            });
-        } else {
-            repliesHtml = '<div style="padding:40px;text-align:center;color:#ccc;font-size:13px;">- 暂无回复 -</div>';
-        }
-
+    // 新增：渲染备忘录详情页
+    function renderMemoDetail(container, data) {
+        const titleHtml = data.title ? `<div class="md-title">${data.title}</div>` : '';
         container.innerHTML = `
-            <div class="cp-forum-container">
-                <div class="forum-main-area">
-                    <div class="forum-header-row">
-                        <img src="${charAvatar}" class="forum-avatar">
-                        <div class="forum-user-name">${charName}</div>
-                    </div>
-                    <div class="forum-post-title">${postTitle}</div>
-                    <div class="forum-post-body">${postBody}</div>
-                </div>
-                <div class="forum-reply-divider"></div>
-                <div class="forum-reply-title">全部回复 (${replies.length})</div>
-                <div class="forum-comment-list">${repliesHtml}</div>
-            </div>`;
-    }
-    // 渲染真实聊天 (我和Char)
-    function renderRealChatDetail(container, char) {
-        container.innerHTML = `<div class="chat-detail-container"></div>`;
-        const inner = container.querySelector('.chat-detail-container');
-        
-        // 取最近30条
-        const recent = char.messages.slice(-30);
-        
-        // 获取头像
-        const myAvatar = document.getElementById('meAvatarImg') ? document.getElementById('meAvatarImg').src : 'https://placehold.co/100';
-        const charAvatar = char.avatar;
-
-        recent.forEach(m => {
-            // ★★★ 核心反转：
-            // 这是Char的手机。
-            // Char发的消息 (m.isSelf=false) -> 应该是【右边】(Self/Owner)
-            // User发的消息 (m.isSelf=true)  -> 应该是【左边】(Other)
-            
-            const isOwner = !m.isSelf; // Owner = Char
-            const rowClass = isOwner ? 'right' : 'left';
-            const bubbleClass = isOwner ? 'chat-msg-right-bubble' : 'chat-msg-left-bubble';
-            const avatarSrc = isOwner ? charAvatar : myAvatar;
-
-            const row = document.createElement('div');
-            row.className = `chat-msg-row ${rowClass}`;
-            
-            row.innerHTML = `
-                <img src="${avatarSrc}" class="chat-avatar-img">
-                <div class="chat-bubble-box">
-                    <div class="chat-msg-bubble ${bubbleClass}">${m.text.replace(/\n/g, '<br>')}</div>
-                </div>
-            `;
-            inner.appendChild(row);
-        });
-        
-        setTimeout(() => container.scrollTop = container.scrollHeight, 100);
+            <div class="memo-detail-container">
+                <div class="md-date">${data.date}</div>
+                ${titleHtml}
+                <div class="md-text">${data.text}</div>
+            </div>
+        `;
     }
 
+    // 替换：渲染多回合聊天详情
     function renderSimulatedChatDetail(container, data) {
-        // const char = chatList.find(c => c.id === currentCheckCharId); // 暂时没用到
-        
-        // NPC 头像
         const npcAvatar = `https://placehold.co/100/e0e0e0/555?text=${data.name ? data.name[0] : '?'}`;
-        
-        // 获取 Char (角色) 的头像，用于右侧气泡
         let charAvatar = 'https://placehold.co/100';
         if(currentCheckCharId && typeof chatList !== 'undefined') {
             const charObj = chatList.find(c => c.id === currentCheckCharId);
             if(charObj) charAvatar = charObj.avatar;
         }
 
-        // 兼容处理：确保有内容
-        const incomingText = data.incoming || data.msg || "Wait...";
-        const replyText = data.reply || ""; // 可能为空
+        let html = `<div class="chat-detail-container"><div class="chat-time-center">${data.time}</div>`;
 
-        // 开始构建 HTML
-        let html = `
-            <div class="chat-detail-container">
-                <div class="chat-time-center">${data.time}</div>
+        if (data.chatHistory && data.chatHistory.length > 0) {
+            // 新版：遍历多条聊天记录
+            data.chatHistory.forEach(msg => {
+                const isSelf = msg.sender === 'self';
+                const rowClass = isSelf ? 'right' : 'left';
+                const bubbleClass = isSelf ? 'chat-msg-right-bubble' : 'chat-msg-left-bubble';
+                const avatarSrc = isSelf ? charAvatar : npcAvatar;
                 
-                <!-- 1. 左侧：NPC 发的消息 -->
+                html += `
+                <div class="chat-msg-row ${rowClass}">
+                    <img src="${avatarSrc}" class="chat-avatar-img">
+                    <div class="chat-bubble-box">
+                        <div class="chat-msg-bubble ${bubbleClass}">${msg.text.replace(/\n/g, '<br>')}</div>
+                    </div>
+                </div>`;
+            });
+        } else {
+            // 兼容旧版
+            const incomingText = data.incoming || data.msg || "Wait...";
+            const replyText = data.reply || ""; 
+            html += `
                 <div class="chat-msg-row left">
                     <img src="${npcAvatar}" class="chat-avatar-img">
                     <div class="chat-bubble-box">
                         <div class="chat-msg-bubble chat-msg-left-bubble">${incomingText}</div>
                     </div>
                 </div>`;
-
-        // 2. 右侧：如果有回复，渲染 Char 的回复
-        if(replyText && replyText.trim() !== "") {
-            html += `
-                <div class="chat-msg-row right">
-                    <img src="${charAvatar}" class="chat-avatar-img">
-                    <div class="chat-bubble-box">
-                        <div class="chat-msg-bubble chat-msg-right-bubble">${replyText}</div>
-                    </div>
-                </div>
-            `;
+            if(replyText && replyText.trim() !== "") {
+                html += `
+                    <div class="chat-msg-row right">
+                        <img src="${charAvatar}" class="chat-avatar-img">
+                        <div class="chat-bubble-box">
+                            <div class="chat-msg-bubble chat-msg-right-bubble">${replyText}</div>
+                        </div>
+                    </div>`;
+            }
         }
 
-        html += `</div>`; // 闭合 container
+        html += `</div>`; 
         container.innerHTML = html;
+        
+        setTimeout(() => {
+            const detailContent = document.getElementById('cpDetailContent');
+            if(detailContent) detailContent.scrollTop = detailContent.scrollHeight;
+        }, 50);
     }
+
 
     function renderTiktokDetail(container, data) {
         // 1. 博主名字
@@ -692,8 +655,7 @@
         // 2. 获取最近聊天 (作为上下文)
         const recentChat = char.messages.slice(-20).map(m => `${m.isSelf ? '用户' : '我'}: ${m.text}`).join('\n');
         
-        // ★★★ 核心修改：读取世界书 (World Book) ★★★
-        let wbContext = "";
+                let wbContext = "";
         // 检查主程序里有没有这个函数 (script.js 里的)
         if (typeof getWorldBookContext === 'function') {
             // 传入 char 和 recentChat (用于检测关键词触发的条目)
@@ -703,7 +665,19 @@
             console.warn("未找到 getWorldBookContext 函数，无法读取世界书");
         }
 
-        // ★★★ Prompt 修正：加入世界书 context ★★★
+        // ★★★ 新增：读取线上与线下记忆总结 ★★★
+        let onlineMemText = "";
+        if (char.summaries && char.summaries.length > 0) {
+            onlineMemText = char.summaries.map(s => `[记录于 ${s.date}]: ${s.content}`).join('\n');
+        }
+
+        let offlineMemText = "";
+        if (char.offlineSummaries && char.offlineSummaries.length > 0) {
+            offlineMemText = char.offlineSummaries.map((s, i) => `[线下记忆片段${i+1}]: ${s.content}`).join('\n');
+        } else if (char.offlineSummary) {
+            offlineMemText = char.offlineSummary;
+        }
+
         const systemPrompt = `
 你现在扮演“${char.name}”，正在展示你手机里的真实内容。
 
@@ -713,16 +687,22 @@ ${persona}
 【必须遵守的世界观/额外设定】：
 ${wbContext}
 
+${onlineMemText ? `【线上微信记忆摘要】：\n${onlineMemText}\n` : ''}
+${offlineMemText ? `【线下剧场/约会记忆】：\n${offlineMemText}\n` : ''}
+
 【最近聊天摘要】：
 ${recentChat}
 
 【任务要求】：
-生成以下 5 个模块的 JSON 数据。请根据上面的【世界观】和【人设】来生成内容（例如：如果世界观里有魔法，搜索记录可以是魔法相关的；如果设定是古代/架空，请生成符合该时代语境的内容）。
+生成以下 5 个模块的 JSON 数据。请根据上面的【世界观】、【人设】和【记忆摘要】来生成内容。
 
 1. **messages (微信消息)**：
-   - 生成 3-5 个其他联系人（父母、朋友、同学、世界观里的NPC）。
-   - **禁止**生成“我/User/宝宝”的消息。
-   - 内容要生活化，符合人设。
+   - 生成 3-5 个其他联系人（父母、朋友、同学、世界观里的NPC等）。
+   - **禁止**生成与“我/User/宝宝”等代指玩家本人的直接聊天记录。
+   - **核心要求1：极其真实的碎片化聊天！** 绝对不要把长篇大论塞进一个气泡里！像现代真人发微信一样，**一句话甚至几个字就发一条**。如果对方有很多事要说，必须拆分成连续的 3-5 条短消息连发！
+   - **核心要求2：多回合拉扯**。模拟真实的聊天流（因为拆分得很细，每个联系人请生成 6-15 条短对话）。
+   - **核心要求3：关联最近聊天与记忆**。请让其中 **1-2个联系人** 的聊天话题，与上面的【最近聊天摘要】或【记忆摘要】中发生的事情相关！（比如在背后和闺蜜/兄弟吐槽线下约会的细节、分享、求助关于 User 的事情，或者提及刚刚发生的事）。
+   - 字段格式：包含 name, time, 以及 chatHistory 数组（sender 为 "other" 表示对方发来的，"self" 表示你发出的）。
 
 2. **search (浏览器/社区历史)**：
    - **数量要求**：生成 5-10 条记录。
@@ -730,26 +710,55 @@ ${recentChat}
    - **内容类型**：吐槽贴、求助贴、日常记录等。
    - **评论格式 (forumReplies) 重要指令**：
      - **name 字段**：**不要编造名字！** 所有路人/陌生人统一填写 **"网友"**。只有当你（楼主）回复时，name 填写 **"${char.name}"**。
-     - **回复内容**：生成 8-12 条评论。
+     - **★★★ 核心要求：评论区必须热闹！每篇帖子必须强制生成 8 到 15 条评论！！！绝对不能少于8条！★★★**
      - **你的互动**：请在评论区里挑 1-2 条进行回复。回复格式必须使用 **"回复X楼："**，不要使用 "@用户名"。
 
 3. **tiktok (抖音/短视频)**：
-   - 生成 2-4 条视频。
-   - **creator**: 随机生成一个博主名字。
-   - **desc**: 视频的标题/文案。
-   - **script**: 视频画面的详细视觉描述。
-   - **comments**: 生成 3-5 条评论，评论人名字用随机有趣网名。
+   - 生成 2-4 条视频。包含 creator(博主名), desc(文案), script(画面描述), comments(3-5条评论)。
 
 4. **其他模块**：
-   - memos (备忘录)：1-3 条。
+   - memos (备忘录)：生成 2-4 条。**核心要求**：不要只写干瘪的“买菜/拿快递”。请结合【线下约会记忆】或【线上聊天】，写一些符合人设的“私人记录”，比如：关于 User 的暗中观察日记、吃醋记录、吵架后的反思、或者不可告人的小秘密。
+     - 字段必须包含：title(标题), date(日期), text(正文内容，可以详细一点)。
    - shopping (购物车)：1-3 条。
 
 【输出格式 (JSON 示例)】：
 {
   "messages": [ 
-      {"name": "老妈", "incoming": "这周回来吃饭吗？", "reply": "回的", "time": "10:30"}
+      {
+          "name": "高扬", 
+          "time": "17:30",
+          "chatHistory": [
+              {"sender": "other", "text": "周一训练你来吗"},
+              {"sender": "other", "text": "教练说要定名单了"},
+              {"sender": "self", "text": "去"},
+              {"sender": "other", "text": "行"},
+              {"sender": "other", "text": "记得把训练服带上"},
+              {"sender": "other", "text": "对了"},
+              {"sender": "other", "text": "物理错题集整理好没"},
+              {"sender": "other", "text": "借我抄下思路[可怜]"},
+              {"sender": "self", "text": "在书包里"},
+              {"sender": "self", "text": "周一给你"}
+          ]
+      },
+      {
+          "name": "死党",
+          "time": "刚刚",
+          "chatHistory": [
+              {"sender": "self", "text": "救命"},
+              {"sender": "self", "text": "我好像说错话了"},
+              {"sender": "other", "text": "？"},
+              {"sender": "other", "text": "你又干嘛了"},
+              {"sender": "self", "text": "（结合最近聊天摘要的内容进行极短的吐槽...）"}
+          ]
+      }
   ],
-  "memos": [ {"date": "今天", "text": "记得买洗发水"} ],
+  "memos": [ 
+      {
+          "title": "关于(User名字)的观察日记", 
+          "date": "10月9日 23:00", 
+          "text": "今天他/她居然... 真的好可爱，但是又不想直接跟他说。下次要记得惹他/她生气的时候买那个蛋糕哄一下。"
+      }
+  ],
   "shopping": [ {"title": "复古胶片相机", "price": "¥299"} ],
   "tiktok": [ 
       {
@@ -769,11 +778,13 @@ ${recentChat}
               {"name": "网友", "text": "同一个世界同一个男友。"},
               {"name": "${char.name}", "text": "回复1楼：太难了。"}
           ]
-      },
-      { "text": "今日天气", "time": "08:00" }
+      }
   ]
 }
         `;
+
+        
+
 
         const response = await fetch(`${endpoint}/chat/completions`, {
             method: 'POST',
@@ -870,7 +881,7 @@ ${recentChat}
         }, 600); 
     }
 
-    window.refreshPhoneData = async function() {
+        window.refreshPhoneData = async function() {
         if(!currentCheckCharId) return;
         
         const icon = document.getElementById('refreshIcon');
@@ -880,9 +891,16 @@ ${recentChat}
             // 调用 AI 生成接口
             const data = await realGeneratePhoneContent(currentCheckCharId);
             
-            // ★★★ 新增：生成成功后，存入缓存 ★★★
+            // 存入内存缓存
             window.cp_data_cache[currentCheckCharId] = data;
-            g_phoneData = data; // 更新当前临时数据
+            g_phoneData = data; 
+            
+            // ★★★ 修复 3：生成成功后，存入主数据库，防止刷新丢失 ★★★
+            const char = chatList.find(c => c.id === currentCheckCharId);
+            if (char) {
+                char.checkPhoneData = data;
+                if (typeof saveData === 'function') saveData();
+            }
             
             // 渲染界面
             renderAllTabs(data);
@@ -893,6 +911,7 @@ ${recentChat}
             icon.classList.remove('fa-spin'); // 停止转圈
         }
     };
+
 
     window.switchPhoneTab = function(tabName, el) {
         document.querySelectorAll('.cp-tab-item').forEach(item => item.classList.remove('active'));
@@ -922,7 +941,7 @@ ${recentChat}
                 return;
             }
 
-            const reader = new FileReader();
+                        const reader = new FileReader();
             reader.onload = function(evt) {
                 const resultSrc = evt.target.result;
                 const bgUrl = `url(${resultSrc})`;
@@ -937,7 +956,7 @@ ${recentChat}
                     lockScreen.style.backgroundPosition = 'center';
                 }
 
-                // 2. 主屏幕底层 (Home Screen) - 修复解锁后壁纸消失的问题
+                // 2. 主屏幕底层 (Home Screen)
                 const homeBg = document.getElementById('phoneScreenBg');
                 if (homeBg) {
                     homeBg.style.backgroundImage = bgUrl;
@@ -946,10 +965,15 @@ ${recentChat}
                 }
 
                 // --- B. 保存到全局缓存 (下次进来还有) ---
-                // 确保缓存对象存在
                 window.cp_wallpapers_cache = window.cp_wallpapers_cache || {};
-                // 以角色ID为Key保存图片数据
                 window.cp_wallpapers_cache[currentCheckCharId] = resultSrc;
+                
+                // ★★★ 修复 4：将壁纸存入主数据库，防止刷新丢失 ★★★
+                const char = chatList.find(c => c.id === currentCheckCharId);
+                if (char) {
+                    char.checkPhoneWallpaper = resultSrc;
+                    if (typeof saveData === 'function') saveData();
+                }
                 
                 console.log(`已保存角色 [${currentCheckCharId}] 的壁纸`);
             };
@@ -1048,3 +1072,65 @@ ${recentChat}
 
     console.log("✅ 查手机 V3.5 (海盐仿微信版) 已加载");
 })();
+
+    // --- 补回丢失的函数：浏览器/论坛详情渲染 (终极防报错版) ---
+    function renderSearchDetail(container, data) {
+        let charName = "匿名用户";
+        let charAvatar = "https://placehold.co/100";
+        
+        // 【核心修复】：直接从手机界面的标题栏获取名字，彻底避开作用域报错！
+        const titleEl = document.getElementById('cpHeaderTitle');
+        if (titleEl && typeof chatList !== 'undefined') {
+            const extractedName = titleEl.innerText.replace('的手机', '');
+            const charObj = chatList.find(c => c.name === extractedName);
+            if (charObj) {
+                charName = charObj.name;
+                charAvatar = charObj.avatar;
+            }
+        }
+
+        const postTitle = data.text || "无标题";
+        const postBody = data.forumBody || data.text; 
+        const replies = data.forumReplies || [];
+
+        let repliesHtml = '';
+        if (replies.length > 0) {
+            replies.forEach((rep, idx) => {
+                const repName = rep.name || "";
+                const isLZ = (repName === charName || repName === '楼主' || repName.includes(charName));
+                const badgeHtml = isLZ ? `<span class="fc-lz-badge" style="margin-left:6px;">楼主</span>` : '';
+                const floorNum = idx + 1;
+
+                let displayText = rep.text;
+                displayText = displayText.replace(/@[\w\u4e00-\u9fa5]+\s?[:：]?/g, ''); 
+                displayText = displayText.replace(/(回复\d+楼[:：]?)/g, '<span style="color:#999;font-size:0.9em;margin-right:4px;">$1</span>');
+                displayText = displayText.replace(/^(回复[:：])/g, '<span style="color:#999;font-size:0.9em;margin-right:4px;">$1</span>');
+
+                repliesHtml += `
+                <div class="forum-comment-item">
+                    <div class="fc-meta-row">
+                        <span class="fc-floor-label">${floorNum}楼</span>
+                        ${badgeHtml}
+                    </div>
+                    <div class="fc-content" style="margin-top:4px;">${displayText}</div>
+                </div>`;
+            });
+        } else {
+            repliesHtml = '<div style="padding:40px;text-align:center;color:#ccc;font-size:13px;">- 暂无回复 -</div>';
+        }
+
+        container.innerHTML = `
+            <div class="cp-forum-container">
+                <div class="forum-main-area">
+                    <div class="forum-header-row">
+                        <img src="${charAvatar}" class="forum-avatar">
+                        <div class="forum-user-name">${charName}</div>
+                    </div>
+                    <div class="forum-post-title">${postTitle}</div>
+                    <div class="forum-post-body">${postBody}</div>
+                </div>
+                <div class="forum-reply-divider"></div>
+                <div class="forum-reply-title">全部回复 (${replies.length})</div>
+                <div class="forum-comment-list">${repliesHtml}</div>
+            </div>`;
+    }

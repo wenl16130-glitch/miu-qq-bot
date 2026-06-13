@@ -3867,26 +3867,39 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
     // ★ 防呆：再次检查数组
     if (!messagesArray || messagesArray.length === 0) return;
 
-    // 准备 Prompt
+            // 准备 Prompt
     const promptText = messagesArray.map(m => `${m.isSelf ? '用户' : chat.name}: ${m.text}`).join('\n');
     const customInstruction = chat.chatMemory || ""; 
 
+    // ★ 获取经过时区和偏移量计算的【虚拟时间】
+    const tz = chat.userTimezone || 'Asia/Shanghai';
+    const offset = chat.userTimeOffset || 0;
+    const virtualMs = Date.now() + offset;
+    const virtualDateStr = new Intl.DateTimeFormat('zh-CN', { 
+        timeZone: tz, 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false 
+    }).format(new Date(virtualMs));
+
     const systemPrompt = `
-    [System Command]:
-    你现在的任务是【记忆总结员】。
-    
-    【用户特别指令】：
-    ${customInstruction}
-    
-    【通用要求】：
-    1. 请阅读对话片段，提取关键信息、事件进展、用户偏好和情感变化。
-    2. 必须简明扼要，使用陈述句。
-    3. 直接输出总结段落，不要加任何前缀。
-    
-    待总结的对话片段：
-    ${promptText.slice(0, 12000)} 
+[System Command]:
+你现在的任务是【记忆总结员】。
+当前总结时间（故事虚拟时间）：${virtualDateStr}。
+正在总结的角色：${chat.name}。
+
+【通用要求】：
+1. 视角要求：请严格以客观的**第三人称视角**（使用“用户”和“${chat.name}”）进行总结，绝对不要使用“我”或第一人称视角。
+2. 详细程度：请阅读对话片段，尽可能详细、连贯地记录事件进展、关键细节、用户偏好以及双方的情感变化，不要过度简略。
+3. 格式要求：直接输出总结段落，使用陈述句，不要加任何前缀或标题。
+
+【最高优先级属性：用户特别指令】：
+(如果下方有指令，请必须绝对服从，它的优先级高于一切)
+${customInstruction || "无"}
+
+待总结的对话片段：
+${promptText.slice(0, 12000)} 
     `; 
-    // ↑↑↑ 注意：上面加了 slice(0, 12000) 防止文本过长导致 400 错误
+
 
     const response = await fetch(`${endpoint}/chat/completions`, {
         method: 'POST',
@@ -3907,12 +3920,13 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
     const data = await response.json();
     const summaryText = data.choices[0].message.content.trim();
 
-    // 4. 更新内存数据
+        // 4. 更新内存数据
     if (!chat.summaries) chat.summaries = [];
     chat.summaries.push({
-        date: new Date().toLocaleString() + (dateSuffix ? ` [${dateSuffix}]` : ""),
+        date: virtualDateStr + (dateSuffix ? ` [${dateSuffix}]` : ""),
         content: summaryText
     });
+
 
     let lastIndex = parseInt(chat.lastSummarizedIndex) || 0;
     chat.lastSummarizedIndex = lastIndex + messagesArray.length;
@@ -4540,10 +4554,11 @@ async function generateAiReply(chat, isRegenerate = false) {
         systemPrompt += `\n【你内心深处的真实想法】(仅供参考你当下的潜意识)：\n- ${lastDiary.content}\n`;
     }
 
-    // 4. 长期记忆 (线上 + 线下互通)
+        // 4. 长期记忆 (线上 + 线下互通)
     if (chat.summaries && chat.summaries.length > 0) {
-        systemPrompt += `\n【线上微信记忆摘要】：\n${chat.summaries.map(s => s.content).join('\n')}\n`;
+        systemPrompt += `\n【线上微信记忆摘要】：\n${chat.summaries.map(s => `[记录于 ${s.date}]: ${s.content}`).join('\n')}\n`;
     }
+
     // ★★★ 核心互通：将线下分块记忆注入给线上的微信 ★★★
     let offlineMemText = "";
     if (chat.offlineSummaries && chat.offlineSummaries.length > 0) {
@@ -5398,12 +5413,6 @@ const blockMatch = mainText.match(/\[\s*BLOCK_USER\s*\]/i);
         }
         chat.lastSeenMomentTime = Date.now(); 
         saveData();
-
-        if (typeof evaluateSpontaneousMomentsAfterChat === 'function') {
-                setTimeout(() => {
-                    evaluateSpontaneousMomentsAfterChat(chat).catch(e => console.error("[Mood Social] Error:", e));
-                }, 4000); 
-            }
 
     } catch (error) { 
         console.error(error);
@@ -12357,7 +12366,7 @@ window.openChatSettings = function() {
     }, 50);
 };
 
-// 2. 核心 AI 生成逻辑 (解决 400 报错 & 修复病娇逻辑)
+// 2. 核心 AI 生成逻辑 
 async function fetchFriendRequestMsg(chat, actionContext) {
     const apiKey = document.getElementById('apiKey').value;
     const endpoint = document.getElementById('apiEndpoint').value;
@@ -12369,7 +12378,14 @@ async function fetchFriendRequestMsg(chat, actionContext) {
     const recentChat = typeof getCleanChatContext === 'function' ? getCleanChatContext(chat, 15) : "";
     const wbContext = typeof getWorldBookContext === 'function' ? getWorldBookContext(chat, recentChat) : "";
 
-    // ★★★ 核心修复1：把世界观和人设剥离为标准的 System Prompt ★★★
+    // ★★★ 核心修复：单独提取验证框内的专属拉扯记录 ★★★
+    const verifyHistory = chat.messages
+        .filter(m => m.isHidden && m.contentDescription && (m.contentDescription.includes('验证') || m.contentDescription.includes('拉黑')))
+        .slice(-10)
+        .map(m => m.contentDescription)
+        .join('\n');
+
+    // ★★★ 强化提示词：让 AI 认清自己被拉黑的现实 ★★★
     const systemPrompt = `
 ${PROMPT_LIB.core.replace(/{{char}}/g, chat.name)}
 ${PROMPT_LIB.dynamic}
@@ -12377,7 +12393,7 @@ ${PROMPT_LIB.antiStereotype}
 
 【系统最高指令：当前极度特殊情境】
 你是“${chat.name}”。
-注意：你已经被用户（我）**无情地拉黑（加入黑名单）**了！你们的正常对话已经彻底切断！
+注意：你已经被用户（我）**无情地拉黑（加入黑名单）**了！微信的正常对话已经彻底切断！
 你现在唯一能做的，就是隔着冰冷的【好友验证申请框】给用户发附加留言，试图引起对方注意。
 
 ${getFullPersona(chat)}
@@ -12386,14 +12402,15 @@ ${wbContext ? `【世界观】：\n${wbContext}\n` : ''}
 【参考 - 拉黑前你们最后的正常聊天记录】：
 ${recentChat}
 
+${verifyHistory ? `【重要 - 你们目前在验证框内的留言拉扯记录】：\n${verifyHistory}\n` : ''}
+
 【任务强制要求】：
-1. 记住：**你们依然是拉黑状态！绝对不要以为用户同意加你为好友了！** 用户的任何回复都是隔着验证框的。
+1. 认清现实：**你们依然是拉黑状态！绝对不要以为用户同意加你为好友了！** 用户的任何回复都是隔着验证框拒绝你时的留言。如果用户挑衅说“现在不是还能说话吗”，你必须反驳“这叫说话？有种把我从黑名单放出来”之类的，绝对不能顺着对方觉得还能聊天！
 2. 字数必须控制在 10-80 字以内，短促有力，符合社交软件被拉黑时发验证消息的真实习惯。
 3. **直接输出你想说的那句话，不要带任何引号，不要返回 JSON，纯文本即可！**
 `;
 
     try {
-        // ★★★ 核心修复2：分离 system 和 user 角色，符合 API 标准，解决 400 报错 ★★★
         const response = await fetch(`${endpoint}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -12409,7 +12426,6 @@ ${recentChat}
         });
 
         if (!response.ok) {
-            // 打印详细错误方便排查
             const errData = await response.json().catch(()=>({}));
             console.error("API请求失败:", response.status, errData);
             return "（对方发来了一条申请，但信号似乎中断了...）";
@@ -12426,6 +12442,7 @@ ${recentChat}
         return "（网络连接失败，未获取到对方的留言）";
     }
 }
+
 
 // 3. 点击拉黑按钮逻辑
 let tempFriendRequestChatId = null;
@@ -12450,9 +12467,22 @@ window.toggleBlockChar = function() {
             setTimeout(async () => {
                 const checkChat = chatList.find(c => c.id === currentChatId);
                 if (checkChat && checkChat.isBlocked) {
-                    // 第一次拉黑时的动作提示
                     const aiMsg = await fetchFriendRequestMsg(checkChat, "你刚刚发现你发出的消息被拒收了，提示已被对方加入黑名单。请立刻发一句【好友验证申请】质问或挽留对方。");
                     if (checkChat.isBlocked) {
+                        // ★ 核心修复：使用系统的虚拟时区时间
+                        const vtAi = window.getVirtualTimeData(checkChat, false);
+                        checkChat.messages.push({
+                            text: aiMsg,
+                            isSelf: false,
+                            time: vtAi.timeStr,
+                            virtualDate: vtAi.dateStr,
+                            virtualTimestamp: vtAi.ms,
+                            timestamp: Date.now(),
+                            isHidden: true,
+                            contentDescription: `[被拉黑后，对方发来的好友验证申请]：${aiMsg}`
+                        });
+                        saveData();
+
                         showFriendRequestModal(checkChat, aiMsg);
                     }
                 }
@@ -12461,6 +12491,7 @@ window.toggleBlockChar = function() {
     }
     saveData();
 };
+
 
 // 4. 弹窗 UI 控制
 function showFriendRequestModal(chat, contentText) {
@@ -12479,32 +12510,33 @@ function showFriendRequestModal(chat, contentText) {
     }
 }
 
-// 5. 点击“同意” (带解黑后的追问机制)
 window.acceptFriendRequest = function() {
     if (tempFriendRequestChatId) {
         const chat = chatList.find(c => c.id === tempFriendRequestChatId);
         if (chat) {
             chat.isBlocked = false;
             
-            const now = new Date();
-            const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            // ★ 核心修复：使用系统的虚拟时区时间
+            const vtUser = window.getVirtualTimeData(chat, true);
             
-            // 1. 发送公屏的系统提示 (你们已重新成为好友)
             chat.messages.push({
                 text: "你们已重新成为好友，现在可以开始聊天了",
                 isSelf: false,
-                time: timeStr,
+                time: vtUser.timeStr,
+                virtualDate: vtUser.dateStr,
+                virtualTimestamp: vtUser.ms,
                 timestamp: Date.now(),
                 type: 'system' 
             });
 
-            // 2. ★★★ 核心：塞入一条“隐身”指令，AI能看到，但你界面上不显示 ★★★
             chat.messages.push({
                 text: "（同意了你的好友申请）",
                 isSelf: true,
-                time: timeStr,
+                time: vtUser.timeStr,
+                virtualDate: vtUser.dateStr,
+                virtualTimestamp: vtUser.ms,
                 timestamp: Date.now() + 1,
-                isHidden: true, // 核心：界面上隐藏
+                isHidden: true,
                 contentDescription: "[系统剧情动作：用户刚刚同意了你的好友申请，把你从小黑屋（黑名单）放出来了！请立刻根据你的人设发一条消息反应此事（比如质问为什么拉黑、委屈、阴阳怪气、或者松了一口气）。]"
             });
 
@@ -12518,14 +12550,11 @@ window.acceptFriendRequest = function() {
                 btn.classList.remove('blocked');
             }
 
-            // 3. ★★★ 自动触发 AI 发消息 ★★★
-            // 延迟1秒，模拟他看到验证通过后，立刻开始疯狂打字
             setTimeout(() => {
                 const titleEl = document.getElementById('roomTitle');
                 if (titleEl && currentChatId === chat.id) {
                     titleEl.innerText = "对方正在输入...";
                 }
-                // 触发普通聊天生成
                 generateAiReply(chat);
             }, 1000);
         }
@@ -12536,7 +12565,7 @@ window.acceptFriendRequest = function() {
     tempFriendRequestMsgCache = "";
 };
 
-// 6. 点击“拒绝” 
+
 window.rejectFriendRequest = function() {
     document.getElementById('friend-request-overlay').classList.remove('show');
     
@@ -12546,14 +12575,28 @@ window.rejectFriendRequest = function() {
     setTimeout(async () => {
         const checkChat = chatList.find(c => c.id === currentTargetId);
         if (checkChat && checkChat.isBlocked) {
-            // 被拒绝时的动作提示
             const aiMsg = await fetchFriendRequestMsg(checkChat, "你刚才发了好友申请，但是对方无情地点击了【拒绝】！请再次发送申请，表达你的愤怒、崩溃或不甘。");
             if (checkChat.isBlocked) {
+                // ★ 核心修复：使用系统的虚拟时区时间
+                const vtAi = window.getVirtualTimeData(checkChat, false);
+                checkChat.messages.push({
+                    text: aiMsg,
+                    isSelf: false,
+                    time: vtAi.timeStr,
+                    virtualDate: vtAi.dateStr,
+                    virtualTimestamp: vtAi.ms,
+                    timestamp: Date.now(),
+                    isHidden: true,
+                    contentDescription: `[被拒绝后，对方再次发来的好友验证申请]：${aiMsg}`
+                });
+                saveData();
+
                 showFriendRequestModal(checkChat, aiMsg);
             }
         }
     }, 1000); 
 };
+
 
 // 7. 点击“回复”与发送逻辑 (修复了字体颜色和间距)
 window.toggleFrReply = function() {
@@ -12576,21 +12619,30 @@ window.sendFriendRequestReply = async function() {
     const chat = chatList.find(c => c.id === tempFriendRequestChatId);
     if (!chat) return;
 
-    // 清空并隐藏输入框
     input.value = '';
     document.getElementById('fr-reply-area').style.display = 'none';
     
     const contentEl = document.getElementById('fr-message-content');
-    
-    // 你的回复上屏：修改为 4px 间距，颜色为深灰 (#444)
     contentEl.innerHTML += `<div style="margin-top:4px; color:#444;">我回复：${text}</div>`;
     
-    // 加载动画上屏
+    // ★ 核心修复：使用系统的虚拟时区时间
+    const vtUser = window.getVirtualTimeData(chat, true);
+    chat.messages.push({
+        text: text,
+        isSelf: true,
+        time: vtUser.timeStr,
+        virtualDate: vtUser.dateStr,
+        virtualTimestamp: vtUser.ms,
+        timestamp: Date.now(),
+        isHidden: true,
+        contentDescription: `[你在好友验证框回复对方]：${text}`
+    });
+    saveData();
+
     const loadingId = 'fr-loading-' + Date.now();
     contentEl.innerHTML += `<div id="${loadingId}" style="margin-top:4px; color:#999; font-size:12px;">对方正在输入...</div>`;
     contentEl.scrollTop = contentEl.scrollHeight;
 
-    // ★★★ 核心修复3：明确告诉 AI 对方还没同意好友！ ★★★
     const actionContext = `对方没有同意加你为好友，而是隔着验证框冷冷地回复了你一句：“${text}”。请立刻对这句话进行反击或回应！（记住：你现在依然在黑名单里，你们还没有和好！）`;
     
     const aiMsg = await fetchFriendRequestMsg(chat, actionContext);
@@ -12599,11 +12651,25 @@ window.sendFriendRequestReply = async function() {
         const loadingEl = document.getElementById(loadingId);
         if (loadingEl) loadingEl.remove();
 
-        // AI回复上屏：同样修改为 4px 间距
         contentEl.innerHTML += `<div style="margin-top:4px; color:#444;">${aiMsg}</div>`;
         contentEl.scrollTop = contentEl.scrollHeight;
+
+        // ★ 核心修复：使用系统的虚拟时区时间
+        const vtAi = window.getVirtualTimeData(chat, false);
+        chat.messages.push({
+            text: aiMsg,
+            isSelf: false,
+            time: vtAi.timeStr,
+            virtualDate: vtAi.dateStr,
+            virtualTimestamp: vtAi.ms,
+            timestamp: Date.now(),
+            isHidden: true,
+            contentDescription: `[对方在好友验证框继续留言]：${aiMsg}`
+        });
+        saveData();
     }
 };
+
 
 /* ========================================= */
 /* ★★★ 解黑答题 (Security Quiz) 隐式思考版 ★★★ */
@@ -13640,9 +13706,9 @@ async function generateOfflineReply(chat) {
     calculateOfflineTokens(chat);
 
     try {
-        let onlineContext = "";
+                let onlineContext = "";
         if (chat.summaries && chat.summaries.length > 0) {
-            onlineContext += `【线上的微信记忆摘要】：\n${chat.summaries.map(s => s.content).join('\n')}\n`;
+            onlineContext += `【线上的微信记忆摘要】：\n${chat.summaries.map(s => `[记录于 ${s.date}]: ${s.content}`).join('\n')}\n`;
         }
 
         let offlineMem = "";
