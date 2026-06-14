@@ -724,18 +724,11 @@
                         <div class="settings-spacer"></div>
                         <div style="border-top: 1px dashed #eee; margin: 5px 0 10px 0;"></div>
 
-                        <!-- 6. 总结记忆库 (点击标题展开/收起) -->
-                        <div class="mem-bank-header" id="memBankHeader" onclick="toggleBankList()">
-                            <span class="settings-label" style="font-size:12px;color:#999; margin:0;">总结记忆库 (Summaries)</span>
-                            <i class="fas fa-chevron-right mem-bank-arrow" id="memBankArrow"></i>
-                        </div>
-                        
-                        <!-- 展开后的容器 -->
-                        <div id="memSummaryContainer">
-                            <div id="memSummaryList">
-                                <!-- JS 插入卡片 -->
-                            </div>
-                        </div>
+                        <!-- 6. 记忆档案馆入口 (点击进入全屏页) -->
+<div class="settings-item" onclick="openMemoryVaultPage()" style="border-top: 1px dashed #eee; margin-top: 10px; padding: 15px 5px; cursor: pointer;">
+    <span style="font-size:15px; color:#333; font-weight:600;">记忆库</span>
+    <i class="fas fa-chevron-right" style="color:#ccc; font-size:14px;"></i>
+</div>
 
                         <!-- 7. 统计栏 (保持原样不动) -->
                         <div class="mem-stats-bar">
@@ -812,6 +805,28 @@
                     </div> 
                 </div> 
             </div> 
+
+            <!-- ★★★ 新增：记忆库全屏页面 ★★★ -->
+<div class="api-settings-page" id="memoryVaultPage" style="background-color: #F7F8FA;">
+    <div class="api-header" style="background: #fff; margin-top: 0; padding-top: calc(10px + env(safe-area-inset-top)); border-bottom: 1px solid #f0f0f0;">
+        <i class="fas fa-chevron-left api-back-btn" onclick="closeMemoryVaultPage()"></i>
+        <span class="api-title">记忆库</span>
+        <div class="wb-add-icon" onclick="addManualMemory()"><i class="fas fa-plus"></i></div>
+    </div>
+    
+    <div class="moment-tab-bar" style="background: #fff; margin-bottom: 10px; border-top: none;">
+        <div class="moment-tab-item active" onclick="switchMemoryTab('CORE', this)">核心</div>
+        <div class="moment-tab-item" onclick="switchMemoryTab('IMPORTANT', this)">重要</div>
+        <div class="moment-tab-item" onclick="switchMemoryTab('DAILY', this)">日常</div>
+        <div class="moment-tab-item" onclick="switchMemoryTab('SUMMARY', this)">剧情总结</div>
+    </div>
+    
+    <div class="api-content" id="memoryVaultContent" style="padding: 10px 15px;">
+        <!-- JS 动态渲染区 -->
+    </div>
+</div>
+
+
             
             <div class="api-settings-page" id="apiSettingsPage">
 

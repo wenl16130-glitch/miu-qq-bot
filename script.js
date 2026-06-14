@@ -2200,8 +2200,6 @@ else tUser.classList.remove('checked');
 
         const previewUserImg = document.getElementById('previewUserAvatar');
         if(previewUserImg) previewUserImg.src = currentUserAvatar;
-
-        renderMemSummaryList(chat);
         updateMemStats(chat);
         updateBubblePreview();
         const saveBtn = document.querySelector('.save-float-btn');
@@ -3673,100 +3671,36 @@ if (document.readyState === 'loading') {
     bootApp();
 }
 
-function renderMemSummaryList(chat) {
-    const list = document.getElementById('memSummaryList');
-    list.innerHTML = '';
-    
-    if (!chat.summaries) chat.summaries = [];
-
-    if (chat.summaries.length === 0) {
-        list.innerHTML = '<div style="text-align:center;font-size:12px;color:#ccc;padding:10px;">暂无总结记录</div>';
-        return;
-    }
-
-    // 为了防止索引错乱，保留原始索引
-    const reversedSummaries = chat.summaries.map((item, idx) => ({...item, originalIndex: idx})).reverse();
-
-    reversedSummaries.forEach((item) => {
-        const card = document.createElement('div');
-        card.className = 'mem-summary-card';
-        
-        card.innerHTML = `
-            <div class="mem-card-date">${item.date}</div>
-            <!-- 修改1: 增加 id, 增加 disabled 属性, 去掉 onchange -->
-            <textarea id="mem-summ-${item.originalIndex}" class="mem-card-textarea" disabled>${item.content}</textarea>
-            
-            <div class="mem-card-actions">
-                <!-- 修改2: 新增编辑按钮 -->
-                <span class="mem-edit-btn-text" onclick="toggleSummaryEdit(${item.originalIndex}, this)">编辑</span>
-                <span class="mem-del-btn-text" onclick="deleteSummary(${item.originalIndex})">删除</span>
-            </div>
-        `;
-        list.appendChild(card);
-    });
-}
-/* --- 在 script.js 中添加以下新函数 --- */
-
-// 1. 切换编辑/完成状态
-function toggleSummaryEdit(index, btn) {
-    const textarea = document.getElementById(`mem-summ-${index}`);
-    if (!textarea) return;
-
-    if (textarea.disabled) {
-        // --- 进入编辑模式 ---
-        textarea.disabled = false; // 启用输入
-        textarea.focus();          // 自动聚焦
-        btn.innerText = "完成";    // 按钮变字
-        btn.style.fontWeight = "bold";
-    } else {
-        // --- 点击完成 (保存) ---
-        textarea.disabled = true;  // 禁用输入
-        btn.innerText = "编辑";    // 按钮复原
-        btn.style.fontWeight = "normal";
-        
-        // 执行保存
-        updateSummaryContent(index, textarea.value);
-    }
-}
-
-// 2. 实际保存数据到数据库
+// 1. 更新剧情总结内容
 function updateSummaryContent(index, newContent) {
     const chat = chatList.find(c => c.id === currentChatId);
     if (chat && chat.summaries[index]) {
-        // 更新内存中的数据
         chat.summaries[index].content = newContent;
-        
-        // 保存到 IndexedDB
         saveData();
-        
-        // 刷新 token 统计 (右上角的 token 数)
-        updateMemStats(chat);
-        
-        // 可选：给个轻微震动反馈
+        updateMemStats(chat); // 刷新 Token 统计
         if(navigator.vibrate) {
             try { navigator.vibrate(10); } catch(err) {}
         }
     }
 }
 
+// 2. 删除剧情总结
 function deleteSummary(index) {
-    // 1. 获取当前聊天对象
     const chat = chatList.find(c => c.id === currentChatId);
     if (!chat || !chat.summaries) return;
 
-    // 2. 弹窗确认
-    if (!confirm('确认删除这条记忆总结吗？此操作不可恢复。')) return;
+    if (!confirm('确认删除这条剧情总结吗？此操作不可恢复。')) return;
 
-    // 3. 执行删除 (splice)
     chat.summaries.splice(index, 1);
-
-    // 4. 保存数据库
     saveData();
-
-    // 5. 刷新列表界面和 Token 统计
-    renderMemSummaryList(chat);
     updateMemStats(chat);
+
+    // ★ 核心合并点：删除后，刷新新的全屏记忆库界面，而不是旧的列表
+    if (typeof renderMemoryVault === 'function') {
+        renderMemoryVault('SUMMARY');
+    }
 }
+
 
 function toggleMemMode() {
     const toggle = document.getElementById('memAutoToggle');
@@ -3784,18 +3718,7 @@ function toggleMemMode() {
     
     saveCurrentChatSettings();
 }
-function toggleBankList() {
-    const header = document.getElementById('memBankHeader');
-    const container = document.getElementById('memSummaryContainer');
-    
-    header.classList.toggle('open');
-    
-    if (header.classList.contains('open')) {
-        container.style.display = 'flex';
-    } else {
-        container.style.display = 'none';
-    }
-}
+
 function switchMemMode(mode, autoSave = true) {
     const btnAuto = document.getElementById('modeBtnAuto');
     const btnManual = document.getElementById('modeBtnManual');
@@ -3859,19 +3782,17 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
     const endpoint = apiConfig.endpoint;
     const key = apiConfig.key;
     const model = apiConfig.model;
-    const maxTokens = apiConfig.maxTokens;
-    const temperature = apiConfig.temperature;
 
     if (!key) throw new Error("缺少 API Key");
     
     // ★ 防呆：再次检查数组
     if (!messagesArray || messagesArray.length === 0) return;
 
-            // 准备 Prompt
-    const promptText = messagesArray.map(m => `${m.isSelf ? '用户' : chat.name}: ${m.text}`).join('\n');
+    const userName = chat.userRemark || chat.userRealName || "我";
+    const promptText = messagesArray.map(m => `${m.isSelf ? userName : chat.name}: ${m.text}`).join('\n');
     const customInstruction = chat.chatMemory || ""; 
 
-    // ★ 获取经过时区和偏移量计算的【虚拟时间】
+    // 获取虚拟时间
     const tz = chat.userTimezone || 'Asia/Shanghai';
     const offset = chat.userTimeOffset || 0;
     const virtualMs = Date.now() + offset;
@@ -3881,25 +3802,44 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
         hour: '2-digit', minute: '2-digit', hour12: false 
     }).format(new Date(virtualMs));
 
+    // ★★★ 核心升级：要求大模型返回 JSON，同时包含剧情总结和记忆碎片 ★★★
     const systemPrompt = `
 [System Command]:
 你现在的任务是【记忆总结员】。
 当前总结时间（故事虚拟时间）：${virtualDateStr}。
 正在总结的角色：${chat.name}。
+正在对话的对象：${userName}。
 
-【通用要求】：
-1. 视角要求：请严格以客观的**第三人称视角**（使用“用户”和“${chat.name}”）进行总结，绝对不要使用“我”或第一人称视角。
-2. 详细程度：请阅读对话片段，尽可能详细、连贯地记录事件进展、关键细节、用户偏好以及双方的情感变化，不要过度简略。
-3. 格式要求：直接输出总结段落，使用陈述句，不要加任何前缀或标题。
+【核心任务】：
+请阅读下方的对话片段，提取出两部分内容。⚠️这两部分必须分工明确，绝对不能内容重复：
+1. 剧情总结 (plotSummary)：负责记录“发生了什么”。详细记录事件的时间线和客观脉络。
+2. 记忆碎片 (extractedMemories)：负责提炼出具有复用价值的【情报与设定】。基于剧情，提取出关于“${userName}”的客观事实、行为规律、重要约定等。
+⚠️警告：记忆碎片的唯一作用是作为资料库供你未来参考。绝对不要写成日记或感悟！
 
-【最高优先级属性：用户特别指令】：
+【强制输出格式协议】：
+你必须且只能返回一个标准的 JSON 对象，严禁输出任何 Markdown 代码块或解释性文字。格式如下：
+{
+  "plotSummary": "1. 视角要求：以“${chat.name}”的视角或第三人称记录事件。\\n2. 称呼要求：提到对方时，必须用你想叫的那个称呼。\\n3. 详细程度：请阅读对话片段，尽可能详细、连贯地记录事件进展、关键细节、用户偏好以及双方的情感变化，不要过度简略。\\n4. 格式要求：直接输出总结段落，不要加任何前缀或标题",
+  "extractedMemories": [
+    {
+      "category": "DAILY",     // ⚠️必须从以下三种分类中严格选择其一（请极其吝啬地使用 CORE 和 IMPORTANT）：
+                               // 1. CORE: 绝对不可遗忘的基石设定。
+                               // 2. IMPORTANT: 深刻的性格特征、长期的行为规律、重大且长期的约定。
+                               // 3. DAILY : 琐碎的日常经历、单次发生的事件、近期的短期状态等。
+      // ★★★ 核心修改：拒绝叙事，明确权重分级 ★★★
+      "content": "⚠️记录规则：绝对不要写成日记或叙事流水账！必须是精炼、确切的【结论性情报】。严禁记录无意义的闲聊废话！",
+      "weight": 8 // 填入 1 到 10 的整数。1-3代表决定关系破裂的底线或核心规律；4-5代表较深刻的性格；6-10代表普通的日常分享，单次事件或短期状态。请严格按此标准打分！
+    }
+  ]
+}
+
+【最高优先级属性：特别指令】：
 (如果下方有指令，请必须绝对服从，它的优先级高于一切)
 ${customInstruction || "无"}
 
 待总结的对话片段：
 ${promptText.slice(0, 12000)} 
     `; 
-
 
     const response = await fetch(`${endpoint}/chat/completions`, {
         method: 'POST',
@@ -3918,30 +3858,64 @@ ${promptText.slice(0, 12000)}
     }
     
     const data = await response.json();
-    const summaryText = data.choices[0].message.content.trim();
+    let resultRaw = data.choices[0].message.content.trim();
+    
+    // ★★★ JSON 清洗与解析 ★★★
+    resultRaw = resultRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const jsonStart = resultRaw.indexOf('{');
+    const jsonEnd = resultRaw.lastIndexOf('}');
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+        resultRaw = resultRaw.substring(jsonStart, jsonEnd + 1);
+    }
 
-        // 4. 更新内存数据
+    let parsedObj;
+    try {
+        parsedObj = JSON.parse(resultRaw);
+    } catch (e) {
+        console.error("记忆总结 JSON 解析失败，尝试回退", e);
+        // 灾难回退：如果 AI 没按格式输出，把所有文字塞进剧情总结里
+        parsedObj = { plotSummary: resultRaw, extractedMemories: [] };
+    }
+
+    const summaryText = parsedObj.plotSummary || "（剧情总结提取失败）";
+    const newMemories = parsedObj.extractedMemories || [];
+
+    // 1. 保存剧情总结 (旧版逻辑兼容)
     if (!chat.summaries) chat.summaries = [];
     chat.summaries.push({
         date: virtualDateStr + (dateSuffix ? ` [${dateSuffix}]` : ""),
         content: summaryText
     });
 
+    // 2. 保存 AI 提取的记忆碎片到“记忆库”
+    if (!chat.memoryArchive) chat.memoryArchive = [];
+    newMemories.forEach(mem => {
+        if (mem.content && mem.category && mem.weight) {
+            chat.memoryArchive.unshift({
+                id: 'mem_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                category: mem.category,
+                content: mem.content,
+                weight: parseInt(mem.weight) || 5,
+                date: virtualDateStr
+            });
+        }
+    });
 
+    // 更新索引
     let lastIndex = parseInt(chat.lastSummarizedIndex) || 0;
     chat.lastSummarizedIndex = lastIndex + messagesArray.length;
     
-    // 双重保险：不能超过当前总长度
     if (chat.lastSummarizedIndex > chat.messages.length) {
         chat.lastSummarizedIndex = chat.messages.length;
     }
 
     await db.chats.put(chat);
     
-    // 5. 刷新界面
-    renderMemSummaryList(chat);
+    // 刷新界面
+    if (typeof renderMemoryVault === 'function') renderMemoryVault(currentMemoryTab);
     updateMemStats(chat);
 }
+
 
 function updateMemStats(chat) {
     if(!chat) return;
@@ -4558,6 +4532,22 @@ async function generateAiReply(chat, isRegenerate = false) {
     if (chat.summaries && chat.summaries.length > 0) {
         systemPrompt += `\n【线上微信记忆摘要】：\n${chat.summaries.map(s => `[记录于 ${s.date}]: ${s.content}`).join('\n')}\n`;
     }
+
+        // ★★★ 5. 注入动态记忆库 (核心升级) ★★★
+    if (chat.memoryArchive && chat.memoryArchive.length > 0) {
+        // 过滤出 权重 1-6 的高优记忆，或者 CORE 核心记忆，并按照权重从小到大排序 (1最优先)
+        const activeMemories = chat.memoryArchive
+            .filter(m => m.weight <= 6 || m.category === 'CORE')
+            .sort((a, b) => a.weight - b.weight);
+
+        if (activeMemories.length > 0) {
+            systemPrompt += `\n【你的核心记忆库 (按重要性排序，你深知这些事)】：\n`;
+            activeMemories.forEach(m => {
+                systemPrompt += `- ${m.content}\n`;
+            });
+        }
+    }
+
 
     // ★★★ 核心互通：将线下分块记忆注入给线上的微信 ★★★
     let offlineMemText = "";
@@ -15379,3 +15369,137 @@ ${getFullPersona(chat)}
     }
 }
 
+// =========================================
+// ★★★ 记忆库 (Memory Vault) 核心逻辑系统 ★★★
+// =========================================
+
+let currentMemoryTab = 'CORE'; 
+
+// 1. 打开/关闭页面
+function openMemoryVaultPage() {
+    document.getElementById('memoryVaultPage').classList.add('active');
+    renderMemoryVault(currentMemoryTab);
+}
+
+function closeMemoryVaultPage() {
+    document.getElementById('memoryVaultPage').classList.remove('active');
+    saveData(); 
+}
+
+// 2. 切换 Tab
+function switchMemoryTab(tabName, el) {
+    currentMemoryTab = tabName;
+    const tabs = document.getElementById('memoryVaultPage').querySelectorAll('.moment-tab-item');
+    tabs.forEach(tab => tab.classList.remove('active'));
+    el.classList.add('active');
+    renderMemoryVault(tabName);
+}
+
+// 3. 渲染记忆卡片
+function renderMemoryVault(category) {
+    const container = document.getElementById('memoryVaultContent');
+    const chat = chatList.find(c => c.id === currentChatId);
+    if (!chat) return;
+
+    container.innerHTML = '';
+    
+    // 初始化数据结构
+    if (!chat.memoryArchive) chat.memoryArchive = [];
+
+    // 如果是“剧情总结”Tab，复用你原来的 summaries 数据
+    if (category === 'SUMMARY') {
+        if (!chat.summaries || chat.summaries.length === 0) {
+            container.innerHTML = '<div style="text-align:center;color:#ccc;margin-top:20px;font-size:12px;">暂无剧情总结</div>';
+            return;
+        }
+        chat.summaries.forEach((s, index) => {
+            container.innerHTML += `
+                <div class="mem-vault-card">
+                    <div class="mem-vault-header">
+                        <span style="font-size:12px;color:#999;">记录于 ${s.date}</span>
+                        <div class="mem-vault-actions"><i class="fas fa-trash" onclick="deleteSummary(${index}); renderMemoryVault('SUMMARY')"></i></div>
+                    </div>
+                    <textarea class="mem-vault-textarea" onchange="updateSummaryContent(${index}, this.value)">${s.content}</textarea>
+                </div>`;
+        });
+        return;
+    }
+
+    // 渲染 Core, Important, Daily
+    const filteredMemories = chat.memoryArchive.filter(m => m.category === category);
+
+    if (filteredMemories.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:#ccc;margin-top:20px;font-size:12px;">暂无该类记忆</div>';
+        return;
+    }
+
+        filteredMemories.forEach(mem => {
+        // 生成 1-10 的下拉选项
+        let optionsHtml = '';
+        for(let i=1; i<=10; i++) {
+            optionsHtml += `<option value="${i}" ${mem.weight == i ? 'selected' : ''}>${i} ${i==1?'(最高)':i==10?'(最低)':''}</option>`;
+        }
+
+        // ★★★ 新增：兼容老数据，判断如果有时间，就生成时间显示的 HTML ★★★
+        const dateHtml = mem.date ? `<span style="font-size:12px; color:#999; margin-left:10px;">记录于 ${mem.date}</span>` : '';
+
+        container.innerHTML += `
+            <div class="mem-vault-card">
+                <div class="mem-vault-header">
+                    <!-- ★★★ 新增一个 flex 容器，把下拉框和时间放在一起 ★★★ -->
+                    <div style="display:flex; align-items:center;">
+                        <select class="mv-tag-select" onchange="updateMemoryAttr('${mem.id}', 'category', this.value)">
+                            <option value="CORE" ${mem.category === 'CORE' ? 'selected' : ''}>核心</option>
+                            <option value="IMPORTANT" ${mem.category === 'IMPORTANT' ? 'selected' : ''}>重要</option>
+                            <option value="DAILY" ${mem.category === 'DAILY' ? 'selected' : ''}>日常</option>
+                        </select>
+                        ${dateHtml} <!-- ★★★ 在这里把时间显示出来 ★★★ -->
+                    </div>
+                    <div class="mem-vault-actions">
+                        <i class="fas fa-trash" onclick="deleteMemory('${mem.id}')"></i>
+                    </div>
+                </div>
+                <textarea class="mem-vault-textarea" placeholder="点击此处编辑新记忆..." onchange="updateMemoryAttr('${mem.id}', 'content', this.value)">${mem.content}</textarea>
+                <div class="mem-vault-weight-row">
+                    <span class="weight-label">记忆权重 (越小越优先)</span>
+                    <select class="weight-select" onchange="updateMemoryAttr('${mem.id}', 'weight', this.value)">
+                        ${optionsHtml}
+                    </select>
+                </div>
+            </div>`;
+    });
+
+}
+
+// 4. 数据更新逻辑
+window.updateMemoryAttr = function(id, attr, value) {
+    const chat = chatList.find(c => c.id === currentChatId);
+    const mem = chat.memoryArchive.find(m => m.id === id);
+    if (mem) {
+        mem[attr] = (attr === 'weight') ? parseInt(value) : value;
+        saveData();
+        if (attr === 'category') renderMemoryVault(currentMemoryTab); // 分类变了，刷新界面让它消失
+    }
+};
+
+window.deleteMemory = function(id) {
+    if(!confirm("确定要删除这条记忆吗？")) return;
+    const chat = chatList.find(c => c.id === currentChatId);
+    chat.memoryArchive = chat.memoryArchive.filter(m => m.id !== id);
+    saveData();
+    renderMemoryVault(currentMemoryTab);
+};
+
+window.addManualMemory = function() {
+    const chat = chatList.find(c => c.id === currentChatId);
+    if (!chat.memoryArchive) chat.memoryArchive = [];
+    
+    chat.memoryArchive.unshift({
+        id: 'mem_' + Date.now(),
+        category: currentMemoryTab === 'SUMMARY' ? 'IMPORTANT' : currentMemoryTab,
+        content: "",
+        weight: 5
+    });
+    saveData();
+    renderMemoryVault(currentMemoryTab === 'SUMMARY' ? 'IMPORTANT' : currentMemoryTab);
+};
