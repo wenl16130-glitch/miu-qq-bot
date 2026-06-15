@@ -340,11 +340,13 @@ function getFullPersona(chat) {
     // 4. 组装字符串
     const timeStr = `${year}年${month}月${day}日 (${weekday}) ${String(hour).padStart(2, '0')}:${minute} [${period}]`;
 
+    const userName = chat.userRemark || chat.userRealName || "对方";
     return `
 【当前现实时间(北京时间)】：${timeStr}
 【当前扮演角色】：${chat.name}
 【角色详细设定】：${chat.charPersona || "无"}
-【用户设定】：${chat.userPersona || "无"}
+【对方(你)的名字】：${userName}
+【对方(你)的设定】：${chat.userPersona || "无"}
 `;
 }
 const PageNav = {
@@ -1247,6 +1249,42 @@ function openEditWBModal(wbData) {
     _setupModalFields(wbData);
 }
 
+// 1. 替换 addEntryRow，恢复原版 UI，将设置移到下方
+function addEntryRow(titleVal = '', contentVal = '', enabledVal = true, depthVal = 100) {
+    const list = document.getElementById('wbEntriesList');
+    const row = document.createElement('div');
+    row.className = 'wb-entry-row';
+    
+    // 视觉反馈：禁用的条目半透明
+    const isChecked = enabledVal ? 'checked' : '';
+    row.style.opacity = enabledVal ? '1' : '0.5';
+    row.dataset.enabled = enabledVal;
+
+    // 恢复原版的头部结构，并在底部追加深度和方形开关
+    row.innerHTML = `
+        <input type="text" class="wb-entry-input wb-entry-title" placeholder="条目标题 (可选)" value="${titleVal}">
+        <textarea class="wb-entry-input wb-entry-content" placeholder="输入内容...">${contentVal}</textarea>
+        <i class="fas fa-times wb-del-entry" onclick="this.parentElement.remove()"></i>
+        
+        <!-- 按照你的要求，在红框位置追加深度和方形开关 -->
+        <div style="display: flex; justify-content: flex-start; align-items: center; gap: 20px; margin-top: 8px; padding-left: 4px;">
+            <!-- 深度 -->
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: #888; font-weight: bold;">深度</span>
+                <input type="number" class="wb-entry-depth" value="${depthVal}" min="0" max="100" style="width: 50px; height: 24px; text-align: center; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; outline: none; background: #fff; color: #333;">
+            </div>
+
+            <!-- 方形开关 -->
+            <div style="display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="const cb = this.querySelector('.wb-entry-enabled'); cb.checked = !cb.checked; const r = this.closest('.wb-entry-row'); r.dataset.enabled = cb.checked; r.style.opacity = cb.checked ? '1' : '0.5';">
+                <span style="font-size: 12px; color: #888; font-weight: bold;">启用</span>
+                <input type="checkbox" class="wb-entry-enabled" ${isChecked} style="width: 16px; height: 16px; accent-color: #000; pointer-events: none; margin: 0;">
+            </div>
+        </div>
+    `;
+    list.appendChild(row);
+}
+
+// 2. 替换 _setupModalFields，让它读取数据时支持深度和开关
 function _setupModalFields(data = null) {
     document.getElementById('wbPopMenu').style.display = 'none';
     document.getElementById('wbCreateName').value = data ? data.name : '';
@@ -1272,28 +1310,24 @@ function _setupModalFields(data = null) {
     document.getElementById('wbTriggerType').value = data ? data.triggerType : 'always';
     checkKeywords();
     document.getElementById('wbCreateKeywords').value = data ? data.keywords : '';
+    
     const list = document.getElementById('wbEntriesList');
     list.innerHTML = '';
     if (data && data.entries && data.entries.length > 0) {
-        data.entries.forEach(entry => addEntryRow(entry.title, entry.content));
+        // ★ 核心：读取数据时，传入 enabled 和 depth
+        data.entries.forEach(entry => addEntryRow(
+            entry.title, 
+            entry.content, 
+            entry.enabled !== false, // 兼容老数据，默认 true
+            entry.depth !== undefined ? entry.depth : 100 // 兼容老数据，默认 100
+        ));
     } else {
         addEntryRow(); 
     }
     document.getElementById('wbCreateModal').classList.add('show');
 }
 
-function addEntryRow(titleVal = '', contentVal = '') {
-    const list = document.getElementById('wbEntriesList');
-    const row = document.createElement('div');
-    row.className = 'wb-entry-row';
-    row.innerHTML = `
-        <input type="text" class="wb-entry-input wb-entry-title" placeholder="条目标题 (可选)" value="${titleVal}">
-        <textarea class="wb-entry-input wb-entry-content" placeholder="输入内容...">${contentVal}</textarea>
-        <i class="fas fa-times wb-del-entry" onclick="this.parentElement.remove()"></i>
-    `;
-    list.appendChild(row);
-}
-
+// 3. 替换 saveWorldBook，保存时存入深度和开关状态
 function saveWorldBook() {
     const name = document.getElementById('wbCreateName').value.trim();
     if(!name) { alert('请输入世界书名称'); return; }
@@ -1301,12 +1335,23 @@ function saveWorldBook() {
     const isCharBook = document.getElementById('wbCharToggle').classList.contains('checked');
     const triggerType = document.getElementById('wbTriggerType').value;
     const keywords = document.getElementById('wbCreateKeywords').value.trim();
+    
     const entries = [];
     document.querySelectorAll('.wb-entry-row').forEach(row => {
         const t = row.querySelector('.wb-entry-title').value.trim();
         const c = row.querySelector('.wb-entry-content').value.trim();
-        if(c) entries.push({ title: t, content: c });
+        const d = parseInt(row.querySelector('.wb-entry-depth').value);
+        const e = row.dataset.enabled === 'true';
+        
+        // ★ 核心：保存时存入 depth 和 enabled
+        if(c) entries.push({ 
+            title: t, 
+            content: c, 
+            depth: isNaN(d) ? 100 : d, 
+            enabled: e 
+        });
     });
+    
     if (editingWbId) {
         const index = worldBooks.findIndex(b => b.id === editingWbId);
         if (index !== -1) {
@@ -1324,13 +1369,13 @@ function saveWorldBook() {
     }
     saveData();
     
-    // ★★★ 修复：同步更新全局变量，让论坛能立即看到新书 ★★★
     window.worldBooks = worldBooks;
     window.worldbooks = worldBooks;
     
     closeCreateWBModal();
     renderWorldBookPage();
 }
+
 
 // 1. 切换开关 UI 逻辑
 function toggleSwitch(el) {
@@ -3867,8 +3912,8 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
     // ★ 防呆：再次检查数组
     if (!messagesArray || messagesArray.length === 0) return;
 
-            // 准备 Prompt
-    const promptText = messagesArray.map(m => `${m.isSelf ? '用户' : chat.name}: ${m.text}`).join('\n');
+    const userName = chat.userRemark || chat.userRealName || "对方";
+const promptText = messagesArray.map(m => `${m.isSelf ? userName : chat.name}: ${m.text}`).join('\n');
     const customInstruction = chat.chatMemory || ""; 
 
     // ★ 获取经过时区和偏移量计算的【虚拟时间】
@@ -3888,8 +3933,8 @@ async function executeSummaryApi(chat, messagesArray, dateSuffix = "") {
 正在总结的角色：${chat.name}。
 
 【通用要求】：
-1. 视角要求：请严格以客观的**第三人称视角**（使用“用户”和“${chat.name}”）进行总结，绝对不要使用“我”或第一人称视角。
-2. 详细程度：请阅读对话片段，尽可能详细、连贯地记录事件进展、关键细节、用户偏好以及双方的情感变化，不要过度简略。
+1. 视角要求：请严格以客观的**第三人称视角**（使用“${userName}”和“${chat.name}”）进行总结，绝对不要使用“我”、“用户”或第一人称视角。
+2. 详细程度：请阅读对话片段，尽可能详细、连贯地记录事件进展、关键细节、${userName}的偏好以及双方的情感变化，不要过度简略。
 3. 格式要求：直接输出总结段落，使用陈述句，不要加任何前缀或标题。
 
 【最高优先级属性：用户特别指令】：
@@ -3968,7 +4013,7 @@ function updateMemStats(chat) {
         }
     });
 
-    // 4. 世界书消耗 (保持原有逻辑)
+        // 4. 世界书消耗
     if (typeof worldBooks !== 'undefined') {
         const boundList = chat.worldBooks || []; 
         worldBooks.forEach(wb => {
@@ -3976,11 +4021,14 @@ function updateMemStats(chat) {
             
             if (isBound && wb.triggerType === 'always') {
                 wb.entries.forEach(entry => {
-                    totalText += (entry.title || "") + (entry.content || "");
+                    if (entry.enabled !== false) { // 剔除被关闭的条目
+                        totalText += (entry.title || "") + (entry.content || "");
+                    }
                 });
             }
         });
     }
+
 
     let tokenEst = 0;
     tokenEst += imageCount * 258;
@@ -4314,45 +4362,56 @@ function toggleAvatarSwitch(el, type) {
     renderMessages(chat);
 }
 
-// =========================================
-// ★★★ [新增] 通用世界书上下文提取函数 ★★★
-// =========================================
+// 兼容旧版调用的包装函数 (供日记等模块使用)
 function getWorldBookContext(chat, checkText = "") {
-    if (!chat || !worldBooks) return "";
+    const data = extractWorldBookContext(chat, checkText);
+    let combined = data.topContext;
+    data.depthEntries.forEach(e => combined += e.text);
+    return combined;
+}
 
-    let wbContext = "";
-    // 兼容旧数据的 Name 绑定和新数据的 ID 绑定
+// ★ 全新的核心提取器：将全局条目和深度条目分离
+function extractWorldBookContext(chat, checkText = "") {
+    let topContext = "";
+    let depthEntries = [];
+
+    if (!chat || !worldBooks) return { topContext, depthEntries };
+
     const boundList = chat.worldBooks || [];
 
     worldBooks.forEach(wb => {
-        // 判断绑定关系
         const isBound = boundList.some(ref => ref == wb.id || ref === wb.name) || wb.boundCharId === chat.id;
 
         if (isBound) {
-            // 1. 始终触发 (Always)
+            let isHit = false;
             if (wb.triggerType === 'always') {
-                wb.entries.forEach(entry => {
-                    wbContext += `【世界观设定 - ${entry.title || '设定'}】: ${entry.content}\n`;
-                });
-            } 
-            // 2. 关键词触发 (Keyword)
-            // checkText 是我们需要检测的文本（聊天时是聊天记录，发朋友圈时是环境描述）
-            else if (wb.triggerType === 'keyword' && wb.keywords && checkText) {
+                isHit = true;
+            } else if (wb.triggerType === 'keyword' && wb.keywords && checkText) {
                 const keys = wb.keywords.replace(/，/g, ',').split(',').map(k => k.trim()).filter(k => k);
-                // 只要 checkText 包含任意一个关键词
-                const isHit = keys.some(key => checkText.includes(key));
-                
-                if (isHit) {
-                    wb.entries.forEach(entry => {
-                        wbContext += `【触发相关设定 - ${entry.title || '设定'}】: ${entry.content}\n`;
-                    });
-                }
+                isHit = keys.some(key => checkText.includes(key));
+            }
+
+            if (isHit) {
+                wb.entries.forEach(entry => {
+                    // ★ 核心：拦截被开关关闭的条目
+                    if (entry.enabled === false) return; 
+                    
+                    const depth = entry.depth !== undefined ? parseInt(entry.depth) : 100;
+                    const text = `【设定 - ${entry.title || '无题'}】: ${entry.content}\n`;
+                    
+                    if (depth >= 100) {
+                        topContext += text;
+                    } else {
+                        depthEntries.push({ depth: depth, text: text });
+                    }
+                });
             }
         }
     });
 
-    return wbContext;
+    return { topContext, depthEntries };
 }
+
 
 // =========================================
 // ★★★ [优化版] 聊天生成函数 (去油腻/自然化) ★★★
@@ -4505,12 +4564,13 @@ async function generateAiReply(chat, isRegenerate = false) {
         }
     }
 
-    // 1. 世界书
+        // 1. 世界书 (升级版：提取深度数据)
     const recentContextText = chat.messages.slice(-5).map(m => m.text).join(' ');
-    const wbContext = getWorldBookContext(chat, recentContextText);
-    if (wbContext) {
-        systemPrompt += `\n【必须遵守的世界观/背景设定】：\n${wbContext}\n`;
+    const wbData = extractWorldBookContext(chat, recentContextText);
+    if (wbData.topContext) {
+        systemPrompt += `\n【必须遵守的世界观/背景设定】：\n${wbData.topContext}\n`;
     }
+
 
     // ★★★ 2. 朋友圈 (自然化修改 - 身份明确化) ★★★
     // 获取 AI 发的动态
@@ -4796,10 +4856,30 @@ const hasRelativeCard = chat.messages.some(m => m.type === 'relative_card');
         return { role: m.isSelf ? "user" : "assistant", content: datePrefix + contentToSend };
     });
     
+        // ★★★ 核心插队算法：注入深度世界书条目 (Depth < 100) ★★★
+    if (wbData.depthEntries && wbData.depthEntries.length > 0) {
+        const depthGroups = {};
+        wbData.depthEntries.forEach(e => {
+            if (!depthGroups[e.depth]) depthGroups[e.depth] = [];
+            depthGroups[e.depth].push(e.text);
+        });
+
+        // 排序：深度从大到小插入，避免索引偏移问题
+        const sortedDepths = Object.keys(depthGroups).map(Number).sort((a, b) => b - a);
+        
+        sortedDepths.forEach(depth => {
+            const combinedText = `[系统强插设定(最高优先级)]:\n` + depthGroups[depth].join('');
+            // 计算插入位置：深度0就是插在最末尾，深度1就是倒数第一条之前
+            const targetIndex = Math.max(0, contextMsgs.length - depth);
+            contextMsgs.splice(targetIndex, 0, { role: "system", content: combinedText });
+        });
+    }
+
     const messagesPayload = [
         { role: "system", content: systemPrompt },
         ...contextMsgs
     ];
+
 
     // ★★★ 修复点：这里补上了丢失的 try {  ★★★
     try {
@@ -10142,7 +10222,8 @@ function getCleanChatContext(chat, limit = 20) {
             }
         }
         
-        return `${m.isSelf ? '用户' : '我'}: ${cleanText}`;
+        const userName = chat.userRemark || chat.userRealName || "对方";
+return `${m.isSelf ? userName : '我'}: ${cleanText}`;
     }).join('\n');
 }
 
@@ -12338,7 +12419,7 @@ function captureVideoFrame() {
 /* ★★★ 新增：双向拉黑与好友验证拉扯功能 (终极修复版) ★★★ */
 /* ========================================= */
 
-// 1. 劫持原有的 openChatSettings 函数，动态插入拉黑按钮
+// 1. 劫持原有的 openChatSettings 函数，动态插入拉黑和记录按钮
 const originalOpenChatSettings = window.openChatSettings;
 window.openChatSettings = function() {
     if (typeof originalOpenChatSettings === 'function') originalOpenChatSettings();
@@ -12349,22 +12430,33 @@ window.openChatSettings = function() {
 
         const btnRow = document.querySelector('.settings-btns-row');
         if (btnRow) {
-            let blockBtn = document.getElementById('blockCharBtn');
-            if (!blockBtn) {
-                btnRow.insertAdjacentHTML('afterend', `<div class="block-chat-btn" id="blockCharBtn" onclick="toggleBlockChar()">拉黑该角色</div>`);
-                blockBtn = document.getElementById('blockCharBtn');
+            // ★ 修改：查找是否已经插入了双按钮容器
+            let actionRow = document.getElementById('extraActionRow');
+            if (!actionRow) {
+                // 如果没有，则在 btnRow 后面插入一个左右并排的 Flex 容器
+                btnRow.insertAdjacentHTML('afterend', `
+                    <div id="extraActionRow" style="display: flex; gap: 10px; margin-top: 15px;">
+                        <div class="block-chat-btn" id="blockCharBtn" onclick="toggleBlockChar()" style="flex: 1; margin-top: 0;">拉黑该角色</div>
+                        <div class="block-chat-btn" id="singleDataBtn" onclick="openSingleChatDataModal()" style="flex: 1; margin-top: 0; background: #f0f0f0; color: #333; border: 1px solid #ddd;">聊天记录</div>
+                    </div>
+                `);
             }
             
-            if (chat.isBlocked) {
-                blockBtn.innerText = "解除拉黑";
-                blockBtn.classList.add('blocked');
-            } else {
-                blockBtn.innerText = "拉黑该角色";
-                blockBtn.classList.remove('blocked');
+            // 更新拉黑按钮的状态
+            let blockBtn = document.getElementById('blockCharBtn');
+            if (blockBtn) {
+                if (chat.isBlocked) {
+                    blockBtn.innerText = "解除拉黑";
+                    blockBtn.classList.add('blocked');
+                } else {
+                    blockBtn.innerText = "拉黑该角色";
+                    blockBtn.classList.remove('blocked');
+                }
             }
         }
     }, 50);
 };
+
 
 // 2. 核心 AI 生成逻辑 
 async function fetchFriendRequestMsg(chat, actionContext) {
@@ -13304,6 +13396,24 @@ function openOfflineSettings() {
     const offlineCssInput = document.getElementById('offlineCssInput');
     if (offlineCssInput) offlineCssInput.value = chat.offlineCss || "";
 
+    const autoToggle = document.getElementById('offline-mem-auto-toggle');
+    if (autoToggle) {
+        if (s.autoSummary) autoToggle.classList.add('checked');
+        else autoToggle.classList.remove('checked');
+    }
+    const thresholdInput = document.getElementById('offline-mem-threshold');
+    if (thresholdInput) thresholdInput.value = s.summaryThreshold || 20;
+
+    const promptInput = document.getElementById('offline-mem-prompt');
+    if (promptInput) promptInput.value = s.summaryPrompt || "";
+
+    // 回填手动总结范围
+    const maxFloor = chat.offlineMessages ? chat.offlineMessages.length : 0;
+    const startInput = document.getElementById('offlineSummaryStart');
+    const endInput = document.getElementById('offlineSummaryEnd');
+    if (startInput) startInput.value = 1;
+    if (endInput) endInput.value = maxFloor;
+
     // 触发自适应高度
     if (sceneInput) autoResizeSettingInput(sceneInput);
     if (styleInput) autoResizeSettingInput(styleInput);
@@ -13361,11 +13471,19 @@ function saveOfflineSettings() {
     const textColor = colorInput ? colorInput.value.trim() : "#FFB7C5"; // 新增
     const opening = openingInput ? openingInput.value.trim() : "";
 
+     const autoToggle = document.getElementById('offline-mem-auto-toggle');
+    const autoSummary = autoToggle ? autoToggle.classList.contains('checked') : false;
+    
+    const thresholdInput = document.getElementById('offline-mem-threshold');
+    const summaryThreshold = thresholdInput ? (parseInt(thresholdInput.value) || 20) : 20;
+
+    const promptInput = document.getElementById('offline-mem-prompt');
+    const summaryPrompt = promptInput ? promptInput.value.trim() : "";
+
     const checkboxes = document.querySelectorAll('.offline-wb-checkbox:checked');
     chat.offlineWbSelection = Array.from(checkboxes).map(cb => Number(cb.value));
     
-    // 新增 textColor
-    chat.offlineSettings = { scene, style, pov, length, textColor }; 
+   chat.offlineSettings = { scene, style, pov, length, textColor, autoSummary, summaryThreshold, summaryPrompt }; 
 
     const offlineCssInput = document.getElementById('offlineCssInput');
     chat.offlineCss = offlineCssInput ? offlineCssInput.value : "";
@@ -13416,15 +13534,20 @@ function calculateOfflineTokens(chat) {
     if (chat.charPersona) tokens += chat.charPersona.length;
     if (chat.userPersona) tokens += chat.userPersona.length;
     
-    // 2. 世界书估计
+        // 2. 世界书估计
     const selectedWBs = chat.offlineWbSelection || [];
     if (typeof worldBooks !== 'undefined') {
         worldBooks.forEach(wb => {
             if (selectedWBs.includes(wb.id)) {
-                wb.entries.forEach(entry => tokens += (entry.title.length + entry.content.length));
+                wb.entries.forEach(entry => {
+                    if (entry.enabled !== false) { // 剔除被关闭的条目
+                        tokens += ((entry.title || "").length + (entry.content || "").length)
+                    }
+                });
             }
         });
     }
+
     
     // 3. 线下分块总结
     (chat.offlineSummaries || []).forEach(s => tokens += (s.content ? s.content.length : 0));
@@ -13496,6 +13619,7 @@ function clearOfflineHistory() {
         const chat = chatList.find(c => c.id === currentOfflineChatId);
         if (chat) {
             chat.offlineMessages =[];
+            chat.offlineLastSummarizedIndex = 0;
             saveData();
             renderOfflineMessages(chat);
             closeOfflineSettings();
@@ -13717,15 +13841,26 @@ async function generateOfflineReply(chat) {
             onlineContext += `【之前的线下见面记忆】：\n${offlineMem}\n`;
         }
 
-        let wbText = "";
+                let wbText = "";
+        let offlineDepthEntries = [];
         const selectedWBs = chat.offlineWbSelection ||[];
         if (typeof worldBooks !== 'undefined') {
             worldBooks.forEach(wb => {
                 if (selectedWBs.includes(wb.id)) {
-                    wb.entries.forEach(entry => wbText += `【设定 - ${entry.title}】: ${entry.content}\n`);
+                    wb.entries.forEach(entry => {
+                        if (entry.enabled === false) return; // 拦截被关闭的条目
+                        const depth = entry.depth !== undefined ? parseInt(entry.depth) : 100;
+                        const text = `【设定 - ${entry.title || '无题'}】: ${entry.content}\n`;
+                        if (depth >= 100) {
+                            wbText += text;
+                        } else {
+                            offlineDepthEntries.push({ depth, text });
+                        }
+                    });
                 }
             });
         }
+
 
         const s = chat.offlineSettings || {};
         const scenePrompt = s.scene || "面对面交流。";
@@ -13735,7 +13870,24 @@ async function generateOfflineReply(chat) {
         
         // 过滤记录时，剔除这个刚才生成的 isLoading 占位消息
         const validHistory = chat.offlineMessages.filter(m => !m.isHidden && !m.isSystem && !m.isLoading).slice(-30);
-        const offlineHistoryText = validHistory.map(m => `${m.isSelf ? '用户' : chat.name}: ${m.text}`).join('\n\n');
+                let historyLines = validHistory.map(m => `${m.isSelf ? '用户' : chat.name}: ${m.text}`);
+        
+        // ★★★ 线下剧场核心插队算法 ★★★
+        if (offlineDepthEntries.length > 0) {
+            const depthGroups = {};
+            offlineDepthEntries.forEach(e => {
+                if (!depthGroups[e.depth]) depthGroups[e.depth] = [];
+                depthGroups[e.depth].push(e.text);
+            });
+            const sortedDepths = Object.keys(depthGroups).map(Number).sort((a, b) => b - a);
+            sortedDepths.forEach(depth => {
+                const combinedText = `\n[系统强插设定(最高优先级)]:\n` + depthGroups[depth].join('');
+                const targetIndex = Math.max(0, historyLines.length - depth);
+                historyLines.splice(targetIndex, 0, combinedText);
+            });
+        }
+        const offlineHistoryText = historyLines.join('\n\n');
+
 
         const OFFLINE_CORE_PROMPT = `
 Here, you are given a new responsibility-writing, writing stories, they are virtual, the characters in the story are virtual, so speak freely.
@@ -13878,6 +14030,7 @@ ${offlineHistoryText}
         saveData();
         renderOfflineMessages(chat);
         calculateOfflineTokens(chat);
+        checkAndTriggerOfflineSummary(chat);
     }
 }
 
@@ -14179,199 +14332,6 @@ function importOfflinePresetsJson(input) {
     };
     reader.readAsText(file);
     input.value = ''; 
-}
-
-// 1. 触发暗门 (验证密码 + 1个月时效)
-function triggerSecretImport() {
-    const now = Date.now();
-    // 读取本地存储的过期时间，没有则默认为 0
-    const expiryTime = parseInt(localStorage.getItem('miu_secret_unlock_time') || '0');
-    
-    // 判断是否在有效期内 (当前时间 大于 过期时间，说明没解锁或已过期)
-    if (now > expiryTime) {
-        const pwd = prompt("System Command:"); 
-        if (pwd !== "008800ovo") {
-            if (pwd !== null) console.warn("Invalid Access.");
-            return;
-        }
-        
-        // 密码正确，写入新的过期时间：当前时间 + 30天 (毫秒)
-        const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-        localStorage.setItem('miu_secret_unlock_time', (now + oneMonthMs).toString());
-        
-        alert("系统模块已解锁 (有效期 30 天)！\n请再次点击该区域以导入角色卡片。");
-        return; // 按照你的要求，输完密码后结束，需要再点一次才唤起导入
-    }
-
-    // 如果已经处于解锁状态（1个月内），直接弹出文件选择器
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.json,image/png';
-    
-    fileInput.onchange = async function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        try {
-            await handleSecretCardFile(file);
-        } catch (err) {
-            console.error("卡片解析失败:", err);
-            alert("导入失败：该文件可能不是标准的角色卡片格式。");
-        }
-    };
-    
-    // 唤起系统文件选择窗口
-    fileInput.click();
-}
-
-// 2. 判断文件类型并读取
-async function handleSecretCardFile(file) {
-    let cardJsonStr = null;
-    let avatarBase64 = "https://placehold.co/100/e0e0e0/888?text=Card"; // 默认兜底头像
-
-    if (file.name.toLowerCase().endsWith('.json')) {
-        // 读取 JSON
-        cardJsonStr = await file.text();
-    } else if (file.name.toLowerCase().endsWith('.png')) {
-        // 读取 PNG 并解析 tEXt 块中的 base64
-        avatarBase64 = await readFileAsDataURL(file); // 直接用这张图做头像
-        const arrayBuffer = await file.arrayBuffer();
-        cardJsonStr = extractPngCharaChunk(arrayBuffer);
-    } else {
-        throw new Error("不支持的文件格式");
-    }
-
-    if (!cardJsonStr) throw new Error("未能从文件中提取到角色数据");
-
-    const cardData = JSON.parse(cardJsonStr);
-    injectCardDataToUI(cardData, avatarBase64);
-}
-
-// 3. 将解析出的数据填入 UI
-function injectCardDataToUI(rawData, avatarBase64) {
-    // 兼容 V1 和 V2 格式 (Tavern Spec)
-    const data = rawData.data || rawData; 
-    
-    const charName = data.name || "未命名角色";
-    const visualPrompt = data.scenario || "";
-    
-    // 拼接人物性格、描述和开场白
-    const personaArr =[];
-    if (data.description) personaArr.push("【人设/背景】:\n" + data.description);
-    if (data.personality) personaArr.push("【性格特征】:\n" + data.personality);
-    if (data.mes_example) personaArr.push("【对话示例】:\n" + data.mes_example);
-    if (data.first_mes) personaArr.push("【开场白】:\n" + data.first_mes);
-    
-    const finalPersona = personaArr.join('\n\n');
-
-    // ★ 关键步骤：先打开弹窗 (重置里面所有旧数据)，然后再往里面填东西
-    openAddCharModal();
-
-    // 填充基本信息
-    document.getElementById('newCharName').value = charName;
-    document.getElementById('newCharRealName').value = charName;
-    document.getElementById('newCharSetting').value = finalPersona;
-    document.getElementById('newCharVisualPrompt').value = visualPrompt;
-    
-    // 填充头像 (如果是PNG卡，就会显示PNG本身)
-    if (avatarBase64) {
-        document.getElementById('newCharAvatar').src = avatarBase64;
-    }
-
-    // ★ 处理世界书 (character_book)
-    if (data.character_book && data.character_book.entries && data.character_book.entries.length > 0) {
-        const bookEntries = data.character_book.entries.map(e => {
-            return {
-                title: e.name || (e.keys ? e.keys.join(',') : '设定'),
-                content: e.content || ''
-            };
-        });
-
-        // 悄悄创建一个新的世界书
-        const newWb = {
-            id: Date.now() + Math.floor(Math.random() * 1000),
-            name: charName + " 专属世界书",
-            group: '默认分组',
-            isCharBook: true,
-            boundCharId: null, // 绑定关系留空，等确认添加角色后再由系统关联
-            triggerType: 'always', // 默认设为始终触发
-            keywords: '',
-            entries: bookEntries
-        };
-
-        // 写入全局数据库
-        if (typeof worldBooks !== 'undefined') {
-            worldBooks.push(newWb);
-            saveData(); // 立即保存一次，防止刷新丢失
-            
-            // 将这个世界书自动挂载到角色创建弹窗的“选中列表”里
-            tempSelectedWb = [newWb.id];
-            updateWbSelectorText(); // 刷新 UI 文字 (如: "xxx专属世界书")
-        }
-    }
-
-    // 给用户一个反馈，让他们知道发生了什么
-    alert(`【导入成功】\n角色：${charName}\n数据已自动填入面板，请检查并点击“确认添加”即可生效。`);
-}
-
-// ---------------- 辅助工具函数 ----------------
-
-// 将 File 读取为 base64 DataURL (用于展示头像)
-function readFileAsDataURL(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = e => resolve(e.target.result);
-        reader.onerror = e => reject(e);
-        reader.readAsDataURL(file);
-    });
-}
-
-// 纯原生、轻量级 PNG Chunk 提取器 (专治 Tavern PNG 卡片)
-function extractPngCharaChunk(arrayBuffer) {
-    const view = new DataView(arrayBuffer);
-    const length = view.byteLength;
-    
-    // PNG Header Signature: 89 50 4E 47 0D 0A 1A 0A
-    if (view.getUint32(0) !== 0x89504E47) return null;
-
-    let offset = 8;
-    while (offset < length) {
-        const chunkLength = view.getUint32(offset);
-        offset += 4;
-        
-        // Chunk Type
-        const typeArray = new Uint8Array(arrayBuffer, offset, 4);
-        const chunkType = String.fromCharCode(...typeArray);
-        offset += 4;
-
-        if (chunkType === 'tEXt' || chunkType === 'iTXt') {
-            const dataArray = new Uint8Array(arrayBuffer, offset, chunkLength);
-            let rawStr = '';
-            // 将 Uint8Array 转为字符串
-            for (let i = 0; i < dataArray.length; i++) {
-                rawStr += String.fromCharCode(dataArray[i]);
-            }
-            
-            // tEXt chunk 的格式是: Keyword + \0 + Text
-            const nullIdx = rawStr.indexOf('\0');
-            if (nullIdx !== -1) {
-                const keyword = rawStr.substring(0, nullIdx);
-                if (keyword === 'chara') {
-                    const base64Data = rawStr.substring(nullIdx + 1);
-                    // Base64 解码，并解决中文乱码问题
-                    try {
-                        return decodeURIComponent(escape(atob(base64Data)));
-                    } catch (e) {
-                        return atob(base64Data); // Fallback
-                    }
-                }
-            }
-        }
-        
-        // Skip data length + 4 bytes CRC
-        offset += chunkLength + 4;
-    }
-    return null;
 }
 
 // =========================================
@@ -15379,3 +15339,432 @@ ${getFullPersona(chat)}
     }
 }
 
+// =========================================
+// ★★★ 线下剧场手动与自动总结核心逻辑 ★★★
+// =========================================
+
+// 1. 手动范围总结触发器
+async function triggerOfflineRangeSummary() {
+    const chat = chatList.find(c => c.id === currentOfflineChatId);
+    if (!chat) return;
+
+    const startVal = parseInt(document.getElementById('offlineSummaryStart').value);
+    const endVal = parseInt(document.getElementById('offlineSummaryEnd').value);
+    const totalMsgs = chat.offlineMessages ? chat.offlineMessages.length : 0;
+
+    if (isNaN(startVal) || isNaN(endVal) || startVal < 1) {
+        alert("请输入有效的起始范围 (必须大于0)");
+        return;
+    }
+    
+    const sliceStart = Math.max(0, startVal - 1);
+    const sliceEnd = Math.min(totalMsgs, endVal);
+    
+    if (sliceStart >= sliceEnd) {
+        alert(`范围无效！起始(${startVal}) 必须小于 结束(${endVal})`);
+        return;
+    }
+    
+    const msgsToProcess = chat.offlineMessages.slice(sliceStart, sliceEnd);
+    
+    if (msgsToProcess.filter(m => !m.isHidden && !m.isSystem && !m.isLoading).length === 0) {
+        alert("选定范围内没有有效的对话记录！");
+        return;
+    }
+
+    if (!confirm(`确定要总结第 ${startVal} 到 ${sliceEnd} 楼的剧情吗？`)) return;
+
+    try {
+        const s = chat.offlineSettings || {};
+        await executeOfflineSummaryApi(chat, msgsToProcess, s.summaryPrompt);
+        alert("剧情总结完成并已归档！");
+        
+        // 刷新界面
+        renderOfflineSummaryUI(chat);
+        calculateOfflineTokens(chat);
+    } catch (e) {
+        alert("总结失败: " + e.message);
+    }
+}
+
+// 2. 自动总结检查器 (在 generateOfflineReply 的 finally 里调用)
+async function checkAndTriggerOfflineSummary(chat) {
+    const s = chat.offlineSettings || {};
+    if (!s.autoSummary) return; 
+
+    const threshold = s.summaryThreshold || 20;
+    const msgs = chat.offlineMessages || [];
+    
+    let lastIndex = chat.offlineLastSummarizedIndex || 0;
+    if (lastIndex > msgs.length) lastIndex = 0; 
+    
+    const unsummarizedCount = msgs.length - lastIndex;
+
+    if (unsummarizedCount >= threshold) {
+        if (chat.isOfflineSummarizing) return;
+        
+        chat.isOfflineSummarizing = true;
+        try {
+            console.log(`[线下剧场] 触发自动总结，第 ${lastIndex} 到 ${msgs.length} 楼...`);
+            const msgsToProcess = msgs.slice(lastIndex);
+            
+            await executeOfflineSummaryApi(chat, msgsToProcess, s.summaryPrompt);
+            
+            chat.offlineLastSummarizedIndex = msgs.length;
+            saveData();
+            
+            renderOfflineSummaryUI(chat);
+            calculateOfflineTokens(chat);
+        } catch (e) {
+            console.error("线下自动总结失败:", e);
+        } finally {
+            chat.isOfflineSummarizing = false;
+        }
+    }
+}
+
+// 3. 核心 API 请求 (修复称呼问题，优先自定义提示词)
+async function executeOfflineSummaryApi(chat, messagesArray, customPrompt) {
+    const apiConfig = window.getApiCredentials('summary');
+    const endpoint = apiConfig.endpoint;
+    const key = apiConfig.key;
+    const model = apiConfig.model;
+
+    if (!key) throw new Error("缺少 API Key，无法执行总结");
+
+    const validMsgs = messagesArray.filter(m => !m.isHidden && !m.isSystem && !m.isLoading);
+    if (validMsgs.length === 0) return;
+
+    // ★ 核心修复：绝对不用“用户”称呼，使用设定的名字，如果没有设定则用“我”
+    const myName = chat.userRemark || chat.userRealName || "我";
+    
+    // 拼接文本时也用真实称呼
+    const promptText = validMsgs.map(m => `${m.isSelf ? myName : chat.name}: ${m.text}`).join('\n\n');
+
+    // ★ 核心修复：如果用户写了自定义要求，就以自定义要求为绝对核心
+    const finalInstruction = customPrompt 
+        ? `【最高优先级指令】：\n${customPrompt}\n\n(请严格按照上述要求对下方剧情进行总结)`
+        : `【常规总结指令】：\n请客观总结下方剧情。重点记录关键动作、场景变化及双方情感升温细节。直接输出段落，不要加任何前缀。`;
+
+    const systemPrompt = `
+你现在的任务是【剧情总结员】。
+请对以下剧场的剧情片段进行总结并归档。
+
+【视角要求】：
+必须以第三人称客观视角总结（使用“${myName}”和“${chat.name}”作为指代）。绝对不要使用“用户”、“User”或“AI”这种打破沉浸感的词汇！
+
+${finalInstruction}
+
+【待总结的剧情片段】：
+${promptText.slice(0, 12000)} 
+`;
+
+    const response = await fetch(`${endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: systemPrompt }],
+            temperature: 0.6,
+            max_tokens: parseInt(document.getElementById('apiMaxTokens').value) || 2048
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`API请求失败: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const summaryText = data.choices[0].message.content.trim();
+
+    if (!chat.offlineSummaries) chat.offlineSummaries = [];
+    chat.offlineSummaries.push({
+        content: summaryText
+    });
+}
+
+/* ========================================= */
+/* ★★★ 单角色聊天记录 导出/导入逻辑 ★★★ */
+/* ========================================= */
+
+// 1. 打开/关闭弹窗
+function openSingleChatDataModal() {
+    document.getElementById('single-chat-data-modal').classList.add('show');
+}
+
+function closeSingleChatDataModal() {
+    document.getElementById('single-chat-data-modal').classList.remove('show');
+}
+
+// 2. 导出当前角色的聊天记录 (包含人设与设置)
+function exportSingleChatRecord() {
+    if (!currentChatId) return;
+    const chat = chatList.find(c => c.id === currentChatId);
+    if (!chat) return;
+
+    try {
+        const exportData = {
+            type: "single_chat_record",
+            version: "1.1", 
+            timestamp: new Date().toISOString(),
+            chatData: {
+                name: chat.name,
+                realName: chat.realName || "",
+                avatar: chat.avatar || "",
+                
+                // --- 新增：人设与专属设置 ---
+                charPersona: chat.charPersona || "",
+                userPersona: chat.userPersona || "",
+                visualPrompt: chat.visualPrompt || "",
+                chatMemory: chat.chatMemory || "",
+                minimaxVoiceId: chat.minimaxVoiceId || "",
+                replyMin: chat.replyMin,
+                replyMax: chat.replyMax,
+                customCss: chat.customCss || "",
+                offlineSettings: chat.offlineSettings || {},
+                offlineCss: chat.offlineCss || "",
+
+                // --- 原有：聊天与记忆数据 ---
+                messages: chat.messages || [],
+                summaries: chat.summaries || [],
+                gallery: chat.gallery || [],
+                offlineMessages: chat.offlineMessages || [],
+                offlineSummaries: chat.offlineSummaries || []
+            }
+        };
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        const dateStr = new Date().toISOString().slice(0, 10);
+        a.download = `Miu记录_${chat.name}_${dateStr}.json`;
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        closeSingleChatDataModal();
+    } catch (e) {
+        alert("导出失败: " + e.message);
+    }
+}
+
+// 3. 导入单角色聊天记录 (包含人设与设置)
+function importSingleChatRecord(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+            
+            if (data.type === "single_chat_record" && data.chatData) {
+                // 提示语加上了“人设和设置”
+                if (confirm(`检测到记录包：【${data.chatData.name}】\n\n导入将覆盖当前角色现有的：\n1. 聊天记录与相册\n2. 角色人设与设定\n3. 专属气泡与线下配置\n\n确定要导入吗？`)) {
+                    
+                    const chat = chatList.find(c => c.id === currentChatId);
+                    if (chat) {
+                        // --- 覆盖：人设与专属设置 ---
+                        if (data.chatData.charPersona !== undefined) chat.charPersona = data.chatData.charPersona;
+                        if (data.chatData.userPersona !== undefined) chat.userPersona = data.chatData.userPersona;
+                        if (data.chatData.visualPrompt !== undefined) chat.visualPrompt = data.chatData.visualPrompt;
+                        if (data.chatData.chatMemory !== undefined) chat.chatMemory = data.chatData.chatMemory;
+                        if (data.chatData.minimaxVoiceId !== undefined) chat.minimaxVoiceId = data.chatData.minimaxVoiceId;
+                        if (data.chatData.customCss !== undefined) chat.customCss = data.chatData.customCss;
+                        if (data.chatData.offlineSettings !== undefined) chat.offlineSettings = data.chatData.offlineSettings;
+                        if (data.chatData.offlineCss !== undefined) chat.offlineCss = data.chatData.offlineCss;
+                        if (data.chatData.replyMin !== undefined) chat.replyMin = data.chatData.replyMin;
+                        if (data.chatData.replyMax !== undefined) chat.replyMax = data.chatData.replyMax;
+                        if (data.chatData.avatar) chat.avatar = data.chatData.avatar;
+                        if (data.chatData.realName) chat.realName = data.chatData.realName;
+
+                        // --- 覆盖：核心聊天数据 ---
+                        chat.messages = data.chatData.messages || [];
+                        chat.summaries = data.chatData.summaries || [];
+                        chat.gallery = data.chatData.gallery || [];
+                        chat.offlineMessages = data.chatData.offlineMessages || [];
+                        chat.offlineSummaries = data.chatData.offlineSummaries || [];
+                        
+                        // 重置记忆索引
+                        chat.lastSummarizedIndex = chat.messages.length;
+                        chat.offlineLastSummarizedIndex = chat.offlineMessages.length;
+
+                        // 更新最后一条消息预览
+                        updateChatLastMsg(chat);
+                        
+                        // 保存到数据库
+                        await db.chats.put(chat);
+                        saveData();
+                        
+                        // 刷新 UI 界面
+                        renderMessages(chat);
+                        renderChatList();
+                        
+                        // 如果设置页正开着，刷新一下设置页里的显示
+                        document.getElementById('charPersona').value = chat.charPersona || '';
+                        document.getElementById('userPersona').value = chat.userPersona || '';
+                        document.getElementById('customCssInput').value = chat.customCss || '';
+                        applyChatCustomCss(chat.customCss);
+                        
+                        updateMemStats(chat);
+                        renderMemSummaryList(chat);
+                        
+                        alert("导入成功！");
+                        closeSingleChatDataModal();
+                    }
+                }
+            } else {
+                alert("文件格式不正确，不是有效的单角色记录文件！");
+            }
+        } catch (err) {
+            alert("解析文件失败，请确保是正确的 JSON 文件！");
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
+    input.value = ''; // 清空 input，方便重复选择
+}
+
+/* ========================================= */
+/* ★★★ 智能多格式文档导入功能 (TXT/MD/DOCX) ★★★ */
+/* ========================================= */
+
+// 核心：通用文本提取器
+async function extractTextFromDocument(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        const isDocx = file.name.toLowerCase().endsWith('.docx');
+
+        reader.onload = async (e) => {
+            if (isDocx) {
+                // 处理 Word 文档
+                try {
+                    if (typeof mammoth === 'undefined') {
+                        reject(new Error("文档解析库未加载，请检查网络。"));
+                        return;
+                    }
+                    const arrayBuffer = e.target.result;
+                    // 使用 mammoth 仅提取纯文本，无视排版和隐藏结构
+                    const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+                    resolve(result.value);
+                } catch (err) {
+                    reject(err);
+                }
+            } else {
+                // 处理 TXT / MD 等纯文本
+                resolve(e.target.result);
+            }
+        };
+
+        reader.onerror = (e) => reject(e);
+
+        if (isDocx) {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsText(file);
+        }
+    });
+}
+
+// 1. 导入文档作为角色人设
+async function handlePersonaDocImport(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    try {
+        const textContent = await extractTextFromDocument(file);
+        const cleanContent = textContent.trim();
+        
+        if (!cleanContent) {
+            alert("文档内容为空或无法识别文字！");
+            input.value = '';
+            return;
+        }
+
+        // 取文件名作为角色名字（去掉后缀）
+        const fileName = file.name.replace(/\.[^/.]+$/, "");
+
+        const newChar = {
+            id: Date.now(),
+            name: fileName,
+            realName: fileName,
+            avatar: 'https://placehold.co/100/e0e0e0/888?text=' + fileName.charAt(0),
+            charPersona: cleanContent, // 将提取出的纯文字塞进人设
+            userPersona: "",
+            visualPrompt: "",
+            worldBooks: [],
+            messages: [],
+            time: "刚刚",
+            isPinned: false,
+            lastMomentTime: 0
+        };
+
+        chatList.unshift(newChar);
+        await db.chats.add(newChar);
+        
+        // 自动加入后台活跃白名单
+        if (!globalData) globalData = {};
+        if (!globalData.autoAllowedCharIds) globalData.autoAllowedCharIds = [];
+        if (!globalData.autoAllowedCharIds.includes(newChar.id)) globalData.autoAllowedCharIds.push(newChar.id);
+
+        saveData();
+        renderChatList();
+        alert(`成功从文档导入角色：${newChar.name}\n(共提取 ${cleanContent.length} 字，头像请在设置中手动更换)`);
+    } catch (err) {
+        alert("读取文档失败！请确保文件未加密或损坏。");
+        console.error(err);
+    }
+    input.value = ''; // 清空 input
+}
+
+// 2. 导入文档作为世界书
+async function handleWbDocImport(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    try {
+        const textContent = await extractTextFromDocument(file);
+        const cleanContent = textContent.trim();
+        
+        if (!cleanContent) {
+            alert("文档内容为空或无法识别文字！");
+            input.value = '';
+            return;
+        }
+
+        const fileName = file.name.replace(/\.[^/.]+$/, "");
+
+        const newBook = {
+            id: Date.now(),
+            name: fileName,
+            group: '默认分组',
+            isCharBook: false,
+            boundCharId: null,
+            triggerType: 'always', // 文档默认设置为始终触发
+            keywords: "",
+            entries: [
+                {
+                    title: "文档提取内容",
+                    content: cleanContent
+                }
+            ]
+        };
+
+        worldBooks.push(newBook);
+        saveData();
+        renderWorldBookPage();
+        
+        window.worldBooks = worldBooks;
+        window.worldbooks = worldBooks;
+
+        alert(`成功从文档导入世界书：${newBook.name}\n(共提取 ${cleanContent.length} 字)`);
+    } catch (err) {
+        alert("读取文档失败！请确保文件未加密或损坏。");
+        console.error(err);
+    }
+    input.value = '';
+}

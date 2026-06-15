@@ -15,6 +15,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <!-- 引入样式文件 -->
      <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="style.css">
@@ -130,14 +131,18 @@
             <div class="chat-container" id="chatAppPage">
                 
                 <div id="view-messages" class="tab-view active">
-    <header style="padding-top: 10px; padding-bottom: 5px; display: flex; justify-content: center; align-items: center; position: sticky; top: 0; z-index: 100; background: transparent;">
+        <header style="padding-top: 10px; padding-bottom: 5px; display: flex; justify-content: center; align-items: center; position: sticky; top: 0; z-index: 100; background: transparent;">
 
         <div onclick="closeApp()" style="position: absolute; left: 0; top: 0; width: 60px; height: 100%; z-index: 200; cursor: pointer; background: transparent;"></div>
-
-        <div onclick="triggerSecretImport()" style="position: absolute; right: 60px; top: 0; width: 60px; height: 100%; z-index: 200; cursor: pointer; background: transparent;"></div>
         <div class="app-title" style="font-size: 17px; font-weight: 600; color: #333;">WeChat</div>
+        
+        <i class="fas fa-upload" onclick="document.getElementById('importPersonaDocInput').click()" style="position: absolute; right: 55px; font-size: 18px; cursor: pointer; color: #333;" title="导入文本文档"></i>
+        
         <div class="plus-btn" onclick="togglePlusMenu(event)" style="position: absolute; right: 15px; font-size: 26px; font-weight: 300; cursor: pointer;">+</div>
     </header>
+    <!-- 【新增】：只接受 txt, md, docx 文档 -->
+    <input type="file" id="importPersonaDocInput" accept=".txt,.md,.docx" style="display: none;" onchange="handlePersonaDocImport(this)">
+
 
                     <!-- 分组 Tab -->
                     <div class="group-card">
@@ -1208,13 +1213,21 @@
                 </div>
             </div>
 
-            <!-- World Book Settings Page (REDESIGN) -->
+                        <!-- World Book Settings Page (REDESIGN) -->
             <div class="wb-settings-page" id="worldBookSettingsPage">
                 <div class="wb-main-header">
                     <i class="fas fa-chevron-left" style="font-size:20px;cursor:pointer;" onclick="closeWorldBookSettings()"></i>
                     <div class="wb-main-title">世界书</div>
-                    <div class="wb-add-icon" id="wbHeaderBtn" onclick="toggleWbMenu(event)"><i class="fas fa-plus"></i></div>
+                    
+                    <!-- 【新增】：文档导入按钮和加号用 flex 容器包起来 -->
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <i class="fas fa-upload" onclick="document.getElementById('importWbDocInput').click()" style="font-size:18px; cursor:pointer; color:#333;" title="导入文本文档"></i>
+                        <div class="wb-add-icon" id="wbHeaderBtn" onclick="toggleWbMenu(event)"><i class="fas fa-plus"></i></div>
+                    </div>
                 </div>
+                <!-- 【新增】：只接受 txt, md, docx 文档 -->
+                <input type="file" id="importWbDocInput" accept=".txt,.md,.docx" style="display: none;" onchange="handleWbDocImport(this)">
+
                 
                 <div class="wb-popover" id="wbPopMenu">
                     <div class="wb-pop-item" onclick="openCreateWBModal()">创建世界书</div>
@@ -2495,6 +2508,50 @@
                 * 包含设定、世界书与未隐藏记录。发送 [隐藏:1-5] 可控制楼层显隐。
             </div>
         </div>
+                <!-- ★ 线下剧场记忆与总结设置卡片 ★ -->
+        <div class="settings-card-box" style="margin-top: 15px; padding: 15px; border: 1px solid #eee; box-shadow: none;">
+            <div class="settings-label" style="margin-bottom:15px; margin-left:0; color:#333; font-weight:bold;">记忆与总结设置</div>
+            
+            <!-- 1. 自定义总结要求 -->
+            <div style="margin-bottom: 15px;">
+                <div style="font-size:13px; color:#555; margin-bottom: 8px;">自定义总结要求</div>
+                <textarea class="settings-textarea" id="offline-mem-prompt" placeholder="例如：重点记录双方的动作和感情升温过程，忽略无意义的寒暄..." style="min-height: 70px; background: #f9f9f9; border: 1px solid #eee; border-radius: 10px; padding: 10px; width: 100%; box-sizing: border-box; font-size: 13px; outline: none; resize: none;"></textarea>
+            </div>
+
+            <!-- 2. 自动总结开关 -->
+            <div class="mem-row" style="margin-bottom: 12px; border-bottom: 1px solid #fafafa; padding-bottom: 12px;">
+                <div style="display:flex; flex-direction:column;">
+                    <span style="font-size:14px; color:#333; font-weight:500;">开启自动总结</span>
+                    <span style="font-size:11px; color:#999; margin-top:4px;">达到阈值后将在后台静默总结并归档</span>
+                </div>
+                <div class="wb-toggle" id="offline-mem-auto-toggle" onclick="toggleSwitch(this)">
+                    <div class="wb-toggle-knob"></div>
+                </div>
+            </div>
+
+            <!-- 3. 阈值设定 -->
+            <div class="mem-row" style="margin-bottom: 15px;">
+                <span style="font-size:13px; color:#555;">触发阈值</span>
+                <input type="number" id="offline-mem-threshold" value="20" placeholder="20" style="width: 60px; height: 28px; text-align: center; background: #f5f5f5; border: 1px solid #eee; border-radius: 8px; font-size: 13px; color: #333; outline: none;">
+            </div>
+
+            <div style="border-top: 1px dashed #eee; margin: 15px 0;"></div>
+
+            <!-- 4. 手动执行总结 -->
+            <div class="settings-label" style="font-size:12px;color:#999;margin-bottom:5px; margin-left:0;">手动执行</div>
+            <div class="mem-row" style="margin-bottom:10px;">
+                <span style="font-size:12px;color:#ccc;">范围:</span>
+                <div style="display:flex; align-items:center; gap:5px;">
+                    <input type="number" id="offlineSummaryStart" placeholder="1" style="width:50px; text-align:center; background:#f5f5f5; border:1px solid #eee; border-radius:6px; height:24px; font-size:12px; outline:none;">
+                    <span style="font-size:12px;color:#ccc;">-</span>
+                    <input type="number" id="offlineSummaryEnd" placeholder="End" style="width:50px; text-align:center; background:#f5f5f5; border:1px solid #eee; border-radius:6px; height:24px; font-size:12px; outline:none;">
+                </div>
+            </div>
+            <div class="plump-btn" onclick="triggerOfflineRangeSummary()" style="background:#f9f9f9; color:#333; border:1px solid #ddd; box-shadow:none;">
+                <i class="fas fa-magic"></i> 立即执行总结
+            </div>
+        </div>
+
 
         <!-- ★ 升级版：折叠式线下记忆总结库 ★ -->
         <div class="settings-card-box" style="margin-top: 15px; padding: 15px; border: 1px solid #eee; box-shadow: none;">
@@ -2635,6 +2692,28 @@
         <!-- 关闭按钮强制写死高度 -->
         <div class="glass-btn" onclick="closeMusicSearchModal()" style="width: 100%; height: 44px; min-height: 44px; line-height: 44px; margin-top: 15px; border-radius: 12px; text-align: center; background: #f5f5f5; color: #666; flex-shrink: 0; cursor: pointer;">
             关闭
+        </div>
+    </div>
+</div>
+<!-- ★★★ 新增：单角色聊天记录导入导出弹窗 (美化版) ★★★ -->
+<div id="single-chat-data-modal" class="glass-popup-overlay">
+    <div class="glass-popup-box" style="width: 260px; padding: 20px; align-items: center;">
+        <div class="glass-popup-title" style="margin-bottom: 20px; font-size: 16px;">聊天记录管理</div>
+        
+        <!-- 导出按钮 (向上箭头 + 浅灰色) -->
+        <div onclick="exportSingleChatRecord()" style="width: 100%; height: 44px; background: #f5f5f5; color: #333; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500; margin-bottom: 12px; cursor: pointer;">
+            <i class="fas fa-arrow-up" style="margin-right: 8px; color: #888;"></i> 导出聊天记录
+        </div>
+        
+        <!-- 导入按钮 (向下箭头 + 浅灰色) -->
+        <div onclick="document.getElementById('singleChatImportInput').click()" style="width: 100%; height: 44px; background: #f5f5f5; color: #333; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500; margin-bottom: 20px; cursor: pointer;">
+            <i class="fas fa-arrow-down" style="margin-right: 8px; color: #888;"></i> 导入聊天记录
+        </div>
+        <input type="file" id="singleChatImportInput" accept=".json" style="display: none;" onchange="importSingleChatRecord(this)">
+        
+        <!-- 取消按钮 -->
+        <div onclick="closeSingleChatDataModal()" style="width: 100%; height: 44px; background: #e5e5ea; color: #ff3b30; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; cursor: pointer;">
+            取消
         </div>
     </div>
 </div>
